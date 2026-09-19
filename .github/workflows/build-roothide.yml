@@ -1,0 +1,146 @@
+name: Build PullOver X RootHide
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: pulloverx-roothide-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: RootHide packages (iOS 16 and iOS 17)
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup RootHide Theos
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: roothide/theos
+          sdks-src: xybp888/iOS-SDKs
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "${THEOS}"
+          test -d "${THEOS}/sdks/iPhoneOS16.5.sdk"
+          test -x "${THEOS}/bin/ldid" || command -v ldid
+          xcodebuild -version
+          make --version | head -n 1
+          bash -n build_roothide.sh
+          echo "Using THEOS=${THEOS}"
+
+      - name: Build package
+        shell: bash
+        env:
+          THEOS_PACKAGE_SCHEME: roothide
+        run: |
+          set -euo pipefail
+          ./build_roothide.sh
+
+      - name: Verify and rename packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          # 打 tag 推送时用 tag 作为版本号；普通推送则从 build_roothide.sh
+          # 产出的 deb 文件名（com.mlgm.pulloverx_版本_目标_架构.deb）里解析。
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+            packages16=(packages/ios16/*.deb)
+            base="$(basename "${packages16[0]}")"
+            if [[ "$base" =~ _([0-9]+\.[0-9]+\.[0-9]+)_ios16_ ]]; then
+              VERSION="${BASH_REMATCH[1]}"
+            else
+              VERSION="latest"
+            fi
+          fi
+
+          for ios in ios16 ios17; do
+            packages=(packages/$ios/*.deb)
+            if (( ${#packages[@]} != 1 )); then
+              echo "Expected exactly one $ios package, found ${#packages[@]}." >&2
+              exit 1
+            fi
+            package="${packages[0]}"
+            test -s "$package"
+
+            new_name="PullOverX-RootHide-${ios}-${VERSION}.deb"
+            mv "$package" "packages/$ios/$new_name"
+            echo "Package: packages/$ios/$new_name"
+          done
+
+      - name: Upload iOS 16 Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulloverx-roothide-ios16
+          path: packages/ios16/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload iOS 17 Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulloverx-roothide-ios17
+          path: packages/ios17/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          assets=(release-assets/*/*.deb)
+
+          if (( ${#assets[@]} == 0 )); then
+            echo "Error: no .deb assets found" >&2
+            exit 1
+          fi
+
+          tag="${GITHUB_REF_NAME}"
+          echo "Tag: $tag"
+          echo "Assets to upload: ${assets[*]}"
+
+          if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo "Updating existing release: $tag"
+            gh release upload "$tag" "${assets[@]}" --repo "$GH_REPO" --clobber
+          else
+            echo "Creating new release: $tag"
+            gh release create "$tag" "${assets[@]}" --repo "$GH_REPO" \
+              --title "PullOver X $tag" \
+              --generate-notes
+          fi
+
+          echo "Release published successfully!"
