@@ -11,6 +11,7 @@
 #import "POQuickSwitchMetrics.h"
 #import "POSplitSessionController.h"
 #import "QuickSwitchHorizontalBarView.h"
+#import "POAppRailView.h"
 #import "../POPPath.h"
 #import "../POLocalization.h"
 #import <objc/message.h>
@@ -102,7 +103,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
 }
 
-@interface PullOverViewController ()<POHostSessionControllerDelegate, UIGestureRecognizerDelegate>{
+@interface PullOverViewController ()<POHostSessionControllerDelegate, UIGestureRecognizerDelegate, POAppRailViewDelegate>{
     NSString *pinnedBundleId;
     UIView *contextView;
     UIView *externalSceneStack;
@@ -163,6 +164,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     BOOL scrollSnapAnimationInProgress;
     BOOL quickSwitchOpeningApp;
     QuickSwitchHorizontalBarView *quickSwitchHorizontalBarView;
+    POAppRailView *appRailView;
     UIView *quickSwitchInteractionOverlayView;
     UIView<POQuickSwitchMenuPresenting> *presentedQuickSwitchMenu;
     POQuickSwitchDragCoordinator *quickSwitchDragCoordinator;
@@ -314,6 +316,12 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     quickSwitchHorizontalBarView.selectionDelegate = self;
     [quickSwitchInteractionOverlayView addSubview:quickSwitchHorizontalBarView];
 
+    appRailView = [[POAppRailView alloc] initWithFrame:CGRectZero];
+    appRailView.railDelegate = self;
+    appRailView.hidden = YES;
+    appRailView.alpha = 0;
+    [self.view addSubview:appRailView];
+
     self.contentView = [[UIView alloc] initWithFrame:CGRectZero];
     self.contentView.backgroundColor = [UIColor secondarySystemBackgroundColor];
     self.contentView.layer.cornerRadius = CONTENT_CORNER_RADIUS;
@@ -400,6 +408,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [self.quickSwitchTableView refreshLayoutDirection];
     [quickSwitchHorizontalBarView refreshLayoutDirection];
     [quickSwitchDragCoordinator refreshLayoutDirection];
+    [appRailView refreshLayoutDirection];
 
     if (![[POApplicationHelper settings][@"keyboardAvoiding"] boolValue] && origOffset) {
         [handleScrollView setContentOffset:CGPointMake(0, [self clampedHandleOffset:origOffset.floatValue]) animated:YES];
@@ -409,6 +418,9 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [self.handle refreshHandleSizeAnimated:NO];
     [self applyLayoutPreservingHandlePosition:YES];
     [self.handle refreshNubbedPositionAnimated:NO];
+    if (appRailView && !appRailView.hidden) {
+        [self layoutAppRail];
+    }
     [self reevaluateKeyboardZoomAnimated:YES];
     if (self.view.window && self.view.window.userInteractionEnabled && self.view.alpha > 0.01) {
         [self resetAutoNubTimer];
@@ -642,7 +654,8 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         candidate != quickSwitchBackdropView) {
         for (UIView *view = candidate; view; view = view.superview) {
             if (view == keyboardZoomContainer || view == self.contentView ||
-                view == self.quickSwitchTableView || view == quickSwitchHorizontalBarView) {
+                view == self.quickSwitchTableView || view == quickSwitchHorizontalBarView ||
+                view == appRailView) {
                 return candidate;
             }
             if (view == self.view) {
@@ -1665,6 +1678,9 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
             self->keyboardZoomContainer.center = targetCenter;
         }
         self->handleScrollView.transform = CGAffineTransformMakeTranslation(handleTranslationX, 0);
+        if (self->appRailView && !self->appRailView.hidden) {
+            [self positionAppRail];
+        }
         self->panelBackdropView.alpha = panelBackdropTargetAlpha;
     };
 
@@ -2165,6 +2181,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     if (shouldOpen) {
         panelState = POPanelStateOpen;
         keyboardZoomContainer.hidden = NO;
+        [self updateAppRailVisibilityAnimated:YES];
         if (presentationSnapshotView && !presentationSnapshotView.hidden &&
             hostSession.state == POHostSessionStateLive) {
             [self schedulePresentationSnapshotRetirementForBundleId:hostSession.requestedBundleId
@@ -2196,6 +2213,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
             handleHandoffSnapshot = [self beginHandleVisualHandoffSnapshot];
         }
         panelState = POPanelStateClosed;
+        [self updateAppRailVisibilityAnimated:NO];
         if (previousLayoutMode != [self currentQuickSwitchLayoutMode]) {
             [self applyLayoutPreservingHandlePosition:YES];
             [self inheritVerticalHandleScreenY:inheritedHandleScreenY];
@@ -2663,6 +2681,10 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
     lastLaidOutSize = bounds.size;
     [self updateInteractionBackdropsAnimated:NO];
+    [self updateAppRailVisibilityAnimated:NO];
+    if (appRailView && !appRailView.hidden) {
+        [self positionAppRail];
+    }
     [self reevaluateKeyboardZoomAnimated:NO];
     if (panelState == POPanelStateOpen &&
         self.quickSwitchTableView &&
@@ -2698,6 +2720,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     mirrorZoneView.alpha = 0;
     mirrorZoneHighlighted = NO;
     [self updateInteractionBackdropsAnimated:NO];
+    [self updateAppRailVisibilityAnimated:NO];
     [scrollView bringSubviewToFront:keyboardZoomContainer];
 }
 
@@ -2922,6 +2945,9 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     pinnedBundleId = bundleId;
     [[NSUserDefaults standardUserDefaults] setObject:bundleId forKey:@"lastPinnedBundleId"];
     [self refreshHandleIconIfNeeded];
+    if (appRailView && !appRailView.hidden) {
+        [self layoutAppRail];
+    }
 }
 
 -(void)restoreExternallyActivatedApplicationNatively:(NSString *)bundleId{
@@ -3052,6 +3078,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     deferredOpenGeneration += 1;
     [self addKeyboardZoomSuspension:POKeyboardZoomSuspensionClosing];
     [self dismissPresentedQuickSwitchMenuImmediately];
+    [self setAppRailShown:NO animated:YES];
     if ([self canUseDirectScaledProgrammaticCloseAnimation]) {
         [self performDirectScaledProgrammaticCloseAnimation];
     } else {
@@ -3059,6 +3086,162 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
 }
      
+
+#pragma mark - AppRail
+
+// 小窗完全打开且无任何菜单/过渡时,把手一列展开为常驻应用竖栏。
+-(BOOL)shouldShowAppRail{
+    return appRailView &&
+        panelState == POPanelStateOpen &&
+        !presentedQuickSwitchMenu &&
+        !scrollSnapAnimationInProgress && !scrollView.dragging && !scrollView.decelerating &&
+        self.handle.layoutMode == POHandleLayoutModeVerticalRail &&
+        !scaledProgrammaticCloseAnimating &&
+        !hostedCategoryTransitionPending && !runtimeHostedCategoryTransitionAnimating &&
+        !handleVisualHandoffSnapshotView &&
+        !showingCantHost;
+}
+
+-(void)updateAppRailVisibilityAnimated:(BOOL)animated{
+    [self setAppRailShown:[self shouldShowAppRail] animated:animated];
+}
+
+-(void)setAppRailShown:(BOOL)shown animated:(BOOL)animated{
+    if (!appRailView) {
+        return;
+    }
+    BOOL isVisible = !appRailView.hidden && appRailView.alpha > 0.01;
+    if (shown == isVisible) {
+        if (shown) {
+            [self positionAppRail];
+        }
+        return;
+    }
+
+    if (shown) {
+        appRailView.hidden = NO;
+        [self layoutAppRail];
+        if (!handleVisualHandoffSnapshotView) {
+            self.handle.alpha = 0;
+        }
+        CGRect targetFrame = appRailView.frame;
+        CGRect handleFrame = [handleScrollView convertRect:self.handle.frame toView:self.view];
+        CGFloat startScaleY = MIN(1.0, MAX(1.0, CGRectGetHeight(handleFrame)) / MAX(1.0, CGRectGetHeight(targetFrame)));
+        appRailView.transform = CGAffineTransformMakeScale(1.0, startScaleY);
+        appRailView.alpha = 0;
+        void (^changes)(void) = ^{
+            self->appRailView.transform = CGAffineTransformIdentity;
+            self->appRailView.alpha = 1;
+        };
+        if (animated) {
+            [UIView animateWithDuration:0.22
+                                  delay:0
+                                options:(UIViewAnimationOptionCurveEaseOut |
+                                         UIViewAnimationOptionBeginFromCurrentState |
+                                         UIViewAnimationOptionAllowUserInteraction)
+                             animations:changes
+                             completion:nil];
+        } else {
+            [UIView performWithoutAnimation:changes];
+        }
+        return;
+    }
+
+    if (!presentedQuickSwitchMenu && !handleVisualHandoffSnapshotView) {
+        self.handle.alpha = 1;
+    }
+    if (isVisible) {
+        void (^changes)(void) = ^{
+            self->appRailView.alpha = 0;
+        };
+        void (^completion)(__unused BOOL finished) = ^(__unused BOOL finished) {
+            // 菜单会话或栏内手势进行中时只淡出,不能 hidden,否则会取消驱动交互的触摸。
+            if (!self->presentedQuickSwitchMenu && ![self->appRailView isInteracting]) {
+                self->appRailView.hidden = YES;
+            }
+            self->appRailView.transform = CGAffineTransformIdentity;
+        };
+        if (animated) {
+            [UIView animateWithDuration:0.15
+                                  delay:0
+                                options:(UIViewAnimationOptionCurveEaseOut |
+                                         UIViewAnimationOptionBeginFromCurrentState |
+                                         UIViewAnimationOptionAllowUserInteraction)
+                             animations:changes
+                             completion:completion];
+        } else {
+            [appRailView.layer removeAllAnimations];
+            [UIView performWithoutAnimation:changes];
+            completion(YES);
+        }
+    } else if (!appRailView.hidden && ![appRailView isInteracting] && !presentedQuickSwitchMenu) {
+        appRailView.hidden = YES;
+    }
+}
+
+-(void)layoutAppRail{
+    if (!appRailView) {
+        return;
+    }
+    NSMutableOrderedSet<NSString *> *bundleIds =
+        [NSMutableOrderedSet orderedSetWithArray:[POApplicationHelper quickSwitchBundleIdentifiers]];
+    if (pinnedBundleId.length > 0 &&
+        [POApplicationHelper isUserFacingApplicationBundleId:pinnedBundleId]) {
+        [bundleIds removeObject:pinnedBundleId];
+        [bundleIds insertObject:pinnedBundleId atIndex:0];
+    }
+    [appRailView reloadWithBundleIdentifiers:bundleIds.array
+                              activeBundleId:pinnedBundleId
+                                    tileSize:self.handle.frame.size.width];
+    [self positionAppRail];
+}
+
+-(void)positionAppRail{
+    if (!appRailView || appRailView.hidden) {
+        return;
+    }
+    CGRect handleFrame = [handleScrollView convertRect:self.handle.frame toView:self.view];
+    if (CGRectIsEmpty(handleFrame) || !isfinite(CGRectGetMinX(handleFrame)) ||
+        !isfinite(CGRectGetMinY(handleFrame))) {
+        return;
+    }
+    CGFloat tileSize = CGRectGetWidth(self.handle.frame);
+    CGFloat margin = 10.0;
+    CGFloat topLimit = self.view.safeAreaInsets.top + margin;
+    CGFloat bottomLimit = CGRectGetHeight(self.view.bounds) - self.view.safeAreaInsets.bottom - margin;
+    CGFloat railHeight = MIN(appRailView.preferredContentSize.height, MAX(0, bottomLimit - topLimit));
+    railHeight = MAX(railHeight, tileSize);
+    CGFloat railY = CGRectGetMidY(handleFrame) - railHeight / 2.0;
+    railY = MIN(MAX(railY, topLimit), MAX(topLimit, bottomLimit - railHeight));
+    appRailView.frame = CGRectMake(CGRectGetMinX(handleFrame), railY, tileSize, railHeight);
+}
+
+-(void)appRailView:(UIView *)railView didTapBundleId:(NSString *)bundleId{
+    if (presentedQuickSwitchMenu || [self isPanelTransitioning] || scrollView.dragging ||
+        scrollView.decelerating) {
+        return;
+    }
+    [self cancelAutoNubTimer];
+    if ([bundleId isEqualToString:pinnedBundleId]) {
+        [self handle:self.handle didReceiveTap:nil];
+        return;
+    }
+    [self pinAppWithBundleId:bundleId];
+}
+
+-(void)appRailView:(UIView *)railView didReceivePan:(UIPanGestureRecognizer *)recognizer{
+    if (presentedQuickSwitchMenu) {
+        return;
+    }
+    [self handle:self.handle didPanPanel:recognizer];
+}
+
+-(void)appRailView:(UIView *)railView didReceiveLongPress:(UILongPressGestureRecognizer *)recognizer{
+    if (presentedQuickSwitchMenu) {
+        return;
+    }
+    [self handle:self.handle didLongPress:recognizer];
+}
 
 #pragma mark - MHHandleDelegate
 
@@ -3415,6 +3598,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
 
     presentedQuickSwitchMenu = menu;
+    [self setAppRailShown:NO animated:NO];
     [self cancelQuickSwitchPrewarm];
     [quickSwitchBackdropView.layer removeAllAnimations];
     quickSwitchBackdropView.alpha = 0;
@@ -3449,6 +3633,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [self hideQuickSwitchBackdropImmediately];
     quickSwitchInteractionOverlayView.hidden = YES;
     self.handle.alpha = 1;
+    [self updateAppRailVisibilityAnimated:NO];
     [self updateInteractionBackdropsAnimated:NO];
     [self reconcileCardChromeZOrder];
     [self reevaluateKeyboardZoomAnimated:NO];
@@ -3579,6 +3764,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [self restoreKeyboardZoomImmediately];
     [self showCantHostView];
     [self updateInteractionBackdropsAnimated:NO];
+    [self updateAppRailVisibilityAnimated:NO];
 }
 
 -(void)prepareForNativeApplicationTakeover:(NSString *)bundleId{
@@ -3761,6 +3947,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         BOOL interruptedClosing = panelState == POPanelStateClosing;
         interactiveHostIntentIssued = !startedClosed;
         interactiveHostResumeRequired = interruptedClosing;
+        [self setAppRailShown:NO animated:YES];
         POQuickSwitchLayoutMode previousLayoutMode = [self currentQuickSwitchLayoutMode];
         UIView *handleHandoffSnapshot = nil;
         if (startedClosed &&

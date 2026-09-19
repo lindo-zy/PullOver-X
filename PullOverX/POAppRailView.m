@@ -1,0 +1,241 @@
+//
+//  POAppRailView.m
+//  PullOverX
+//
+//
+
+#import "POAppRailView.h"
+#import "POApplicationHelper.h"
+#import "headers.h"
+#import <objc/runtime.h>
+
+#define PO_APP_RAIL_TILE_GAP 4.0
+#define PO_APP_RAIL_ICON_INSET 5.0
+#define PO_APP_RAIL_CORNER_RADIUS_RATIO (8.0 / 34.0)
+
+@interface POAppRailTile : UIView
+
+@property (nonatomic, copy) NSString *bundleId;
+@property (nonatomic, strong) UIVisualEffectView *blurView;
+@property (nonatomic, strong) UIImageView *iconView;
+
+- (instancetype)initWithTileSize:(CGFloat)tileSize;
+- (void)setHighlighted:(BOOL)highlighted;
+
+@end
+
+@implementation POAppRailTile
+
+- (instancetype)initWithTileSize:(CGFloat)tileSize {
+    if (self = [super initWithFrame:CGRectMake(0, 0, tileSize, tileSize)]) {
+        self.layer.cornerRadius = tileSize * PO_APP_RAIL_CORNER_RADIUS_RATIO;
+        self.layer.cornerCurve = kCACornerCurveContinuous;
+        self.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.layer.shadowOpacity = 0.32;
+        self.layer.shadowRadius = 3.5;
+        self.layer.shadowOffset = CGSizeZero;
+
+        UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial];
+        self.blurView = [[UIVisualEffectView alloc] initWithEffect:blur];
+        self.blurView.userInteractionEnabled = NO;
+        self.blurView.layer.cornerRadius = self.layer.cornerRadius;
+        self.blurView.layer.cornerCurve = kCACornerCurveContinuous;
+        self.blurView.clipsToBounds = YES;
+        self.blurView.frame = self.bounds;
+        [self addSubview:self.blurView];
+
+        CGFloat iconSize = MAX(0, tileSize - PO_APP_RAIL_ICON_INSET * 2.0);
+        self.iconView = [[UIImageView alloc] initWithFrame:CGRectMake(PO_APP_RAIL_ICON_INSET,
+                                                                     PO_APP_RAIL_ICON_INSET,
+                                                                     iconSize,
+                                                                     iconSize)];
+        self.iconView.contentMode = UIViewContentModeScaleAspectFit;
+        self.iconView.clipsToBounds = YES;
+        [self.blurView.contentView addSubview:self.iconView];
+
+        self.isAccessibilityElement = YES;
+        self.accessibilityTraits = UIAccessibilityTraitButton;
+    }
+    return self;
+}
+
+- (void)setHighlighted:(BOOL)highlighted {
+    self.layer.borderWidth = highlighted ? 1.25 : 0;
+    self.layer.borderColor = highlighted ? [UIColor.whiteColor colorWithAlphaComponent:0.65].CGColor : nil;
+    self.layer.shadowOpacity = highlighted ? 0.40 : 0.32;
+}
+
+@end
+
+@interface POAppRailView () <UIGestureRecognizerDelegate>
+
+@end
+
+@implementation POAppRailView {
+    NSMutableArray<POAppRailTile *> *tiles;
+    CGFloat tileSide;
+    NSString *activeBundleId;
+    UIPanGestureRecognizer *railPanGestureRecognizer;
+    UILongPressGestureRecognizer *railLongPressGestureRecognizer;
+    UIImpactFeedbackGenerator *impactGenerator;
+    BOOL hapticsEnabled;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (self = [super initWithFrame:frame]) {
+        tiles = [NSMutableArray array];
+        tileSide = 34.0;
+        activeBundleId = nil;
+
+        self.backgroundColor = UIColor.clearColor;
+        self.showsVerticalScrollIndicator = NO;
+        self.showsHorizontalScrollIndicator = NO;
+        self.alwaysBounceVertical = NO;
+        self.bounces = NO;
+        self.delaysContentTouches = NO;
+        self.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+        self.scrollsToTop = NO;
+        self.clipsToBounds = YES;
+        self.layer.cornerRadius = tileSide * PO_APP_RAIL_CORNER_RADIUS_RATIO;
+        self.layer.cornerCurve = kCACornerCurveContinuous;
+
+        railPanGestureRecognizer = [[UIPanGestureRecognizer alloc] initWithTarget:self
+                                                                         action:@selector(railPan:)];
+        railPanGestureRecognizer.delegate = self;
+        railPanGestureRecognizer.maximumNumberOfTouches = 1;
+        [self addGestureRecognizer:railPanGestureRecognizer];
+
+        railLongPressGestureRecognizer = [[UILongPressGestureRecognizer alloc] initWithTarget:self
+                                                                                     action:@selector(railLongPress:)];
+        railLongPressGestureRecognizer.minimumPressDuration = 0.3;
+        railLongPressGestureRecognizer.delegate = self;
+        [self addGestureRecognizer:railLongPressGestureRecognizer];
+
+        impactGenerator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+        hapticsEnabled = [[POApplicationHelper settings][@"hapticFeedback"] boolValue];
+    }
+    return self;
+}
+
+- (CGSize)preferredContentSize {
+    NSUInteger count = tiles.count;
+    if (count == 0) {
+        return CGSizeMake(tileSide, tileSide);
+    }
+    CGFloat height = tileSide * count + PO_APP_RAIL_TILE_GAP * (count - 1);
+    return CGSizeMake(tileSide, height);
+}
+
+- (void)reloadWithBundleIdentifiers:(NSArray<NSString *> *)bundleIdentifiers
+                     activeBundleId:(NSString *)newActiveBundleId
+                           tileSize:(CGFloat)tileSize {
+    tileSide = MAX(1, tileSize);
+    activeBundleId = [newActiveBundleId copy];
+    hapticsEnabled = [[POApplicationHelper settings][@"hapticFeedback"] boolValue];
+
+    for (POAppRailTile *tile in tiles) {
+        [tile removeFromSuperview];
+    }
+    [tiles removeAllObjects];
+
+    for (NSString *bundleId in bundleIdentifiers) {
+        if (![bundleId isKindOfClass:[NSString class]] || bundleId.length == 0) {
+            continue;
+        }
+        POAppRailTile *tile = [[POAppRailTile alloc] initWithTileSize:tileSide];
+        tile.bundleId = bundleId;
+        tile.iconView.image = [POApplicationHelper imageForBundleId:bundleId];
+        tile.iconView.transform = [self iconLayoutTransform];
+
+        SBApplication *application = [[objc_getClass("SBApplicationController") sharedInstance]
+            applicationWithBundleIdentifier:bundleId];
+        tile.accessibilityLabel = application.displayName ?: bundleId;
+
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                            action:@selector(tileTapped:)];
+        [tile addGestureRecognizer:tap];
+        [self addSubview:tile];
+        [tiles addObject:tile];
+    }
+
+    [self layoutTiles];
+    [self setContentOffset:CGPointZero animated:NO];
+}
+
+- (void)layoutTiles {
+    NSUInteger count = tiles.count;
+    CGFloat contentHeight = tileSide * count + PO_APP_RAIL_TILE_GAP * MAX(0, (NSInteger)count - 1);
+    self.contentSize = CGSizeMake(tileSide, contentHeight);
+    self.scrollEnabled = contentHeight > CGRectGetHeight(self.bounds) + 0.5;
+    for (NSUInteger index = 0; index < count; index++) {
+        POAppRailTile *tile = tiles[index];
+        tile.frame = CGRectMake(0, tileSide * index + PO_APP_RAIL_TILE_GAP * index, tileSide, tileSide);
+        [tile setHighlighted:[tile.bundleId isEqualToString:activeBundleId]];
+    }
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    self.scrollEnabled = self.contentSize.height > CGRectGetHeight(self.bounds) + 0.5;
+}
+
+- (CGAffineTransform)iconLayoutTransform {
+    return [[POApplicationHelper settings][@"leftHanded"] boolValue]
+        ? CGAffineTransformMakeScale(-1.0, 1.0)
+        : CGAffineTransformIdentity;
+}
+
+- (void)refreshLayoutDirection {
+    CGAffineTransform iconTransform = [self iconLayoutTransform];
+    for (POAppRailTile *tile in tiles) {
+        tile.iconView.transform = iconTransform;
+    }
+}
+
+- (BOOL)isInteracting {
+    UIGestureRecognizerState panState = railPanGestureRecognizer.state;
+    UIGestureRecognizerState longPressState = railLongPressGestureRecognizer.state;
+    return panState == UIGestureRecognizerStateBegan ||
+        panState == UIGestureRecognizerStateChanged ||
+        longPressState == UIGestureRecognizerStateBegan ||
+        longPressState == UIGestureRecognizerStateChanged;
+}
+
+- (void)tileTapped:(UITapGestureRecognizer *)recognizer {
+    POAppRailTile *tile = (POAppRailTile *)recognizer.view;
+    if (![tile isKindOfClass:[POAppRailTile class]] || tile.bundleId.length == 0) {
+        return;
+    }
+    if (hapticsEnabled) {
+        [impactGenerator impactOccurred];
+    }
+    [self.railDelegate appRailView:self didTapBundleId:tile.bundleId];
+}
+
+- (void)railPan:(UIPanGestureRecognizer *)recognizer {
+    [self.railDelegate appRailView:self didReceivePan:recognizer];
+}
+
+- (void)railLongPress:(UILongPressGestureRecognizer *)recognizer {
+    [self.railDelegate appRailView:self didReceiveLongPress:recognizer];
+}
+
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
+    if (gestureRecognizer == railPanGestureRecognizer) {
+        CGPoint velocity = [railPanGestureRecognizer velocityInView:self];
+        return fabs(velocity.x) > fabs(velocity.y);
+    }
+    return YES;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    // 横向拖拽交给 railPan 驱动小窗关闭,同时不妨碍内部列表的竖向滚动。
+    if (gestureRecognizer == railPanGestureRecognizer &&
+        otherGestureRecognizer == self.panGestureRecognizer) {
+        return YES;
+    }
+    return NO;
+}
+
+@end

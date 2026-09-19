@@ -36,6 +36,7 @@
 		D100000000000000000001 /* POHostSessionController.mm in Sources */ = {isa = PBXBuildFile; fileRef = D100000000000000000011 /* POHostSessionController.mm */; };
 		DE00000000000000000041 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C71516BA225BE3A20021ADB8 /* CoreGraphics.framework */; };
 		E200000000000000000001 /* QuickSwitchHorizontalBarView.m in Sources */ = {isa = PBXBuildFile; fileRef = E200000000000000000011 /* QuickSwitchHorizontalBarView.m */; };
+		E2A0000000000000000001 /* POAppRailView.m in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000011 /* POAppRailView.m */; };
 		E300000000000000000001 /* POQuickSwitchDragCoordinator.m in Sources */ = {isa = PBXBuildFile; fileRef = E300000000000000000011 /* POQuickSwitchDragCoordinator.m */; };
 		E400000000000000000001 /* POExternalActivationCoordinator.m in Sources */ = {isa = PBXBuildFile; fileRef = E400000000000000000011 /* POExternalActivationCoordinator.m */; };
 		F100000000000000000001 /* POSplitSessionController.m in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000000000011 /* POSplitSessionController.m */; };
@@ -100,6 +101,8 @@
 		DE000000000000000000C0 /* PullOverX.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = PullOverX.xcconfig; sourceTree = "<group>"; };
 		E200000000000000000010 /* QuickSwitchHorizontalBarView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = QuickSwitchHorizontalBarView.h; sourceTree = "<group>"; };
 		E200000000000000000011 /* QuickSwitchHorizontalBarView.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = QuickSwitchHorizontalBarView.m; sourceTree = "<group>"; };
+		E2A0000000000000000010 /* POAppRailView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = POAppRailView.h; sourceTree = "<group>"; };
+		E2A0000000000000000011 /* POAppRailView.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = POAppRailView.m; sourceTree = "<group>"; };
 		E300000000000000000010 /* POQuickSwitchDragCoordinator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = POQuickSwitchDragCoordinator.h; sourceTree = "<group>"; };
 		E300000000000000000011 /* POQuickSwitchDragCoordinator.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = POQuickSwitchDragCoordinator.m; sourceTree = "<group>"; };
 		E400000000000000000010 /* POExternalActivationCoordinator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = POExternalActivationCoordinator.h; sourceTree = "<group>"; };
@@ -190,6 +193,8 @@
 				C71516B5225BDD6A0021ADB8 /* QuickSwitchTableView.m */,
 				E200000000000000000010 /* QuickSwitchHorizontalBarView.h */,
 				E200000000000000000011 /* QuickSwitchHorizontalBarView.m */,
+				E2A0000000000000000010 /* POAppRailView.h */,
+				E2A0000000000000000011 /* POAppRailView.m */,
 				E300000000000000000010 /* POQuickSwitchDragCoordinator.h */,
 				E300000000000000000011 /* POQuickSwitchDragCoordinator.m */,
 				A100000000000000000010 /* POQuickSwitchMetrics.h */,
@@ -327,6 +332,7 @@
 				C71516BF225BF12C0021ADB8 /* POApplicationHelper.m in Sources */,
 				C71516B7225BDD6A0021ADB8 /* QuickSwitchTableView.m in Sources */,
 				E200000000000000000001 /* QuickSwitchHorizontalBarView.m in Sources */,
+				E2A0000000000000000001 /* POAppRailView.m in Sources */,
 				E300000000000000000001 /* POQuickSwitchDragCoordinator.m in Sources */,
 				F100000000000000000001 /* POSplitSessionController.m in Sources */,
 				C7151696225BC4000021ADB8 /* PullOverX.mm in Sources */,
