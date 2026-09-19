@@ -3237,7 +3237,10 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 }
 
 -(void)appRailView:(UIView *)railView didReceiveLongPress:(UILongPressGestureRecognizer *)recognizer{
-    if (presentedQuickSwitchMenu) {
+    // 小窗打开时长按菜单由这路长按手势全程驱动,菜单弹出后 Changed/Ended/Cancelled
+    // 仍必须转发,否则菜单收不起来并挡住全部交互(表现为卡死);只需拦住重复的 Began,
+    // 该情形由 handle:didLongPress: 里的 canBeginQuickSwitchSession 兜底。
+    if (recognizer.state == UIGestureRecognizerStateBegan && presentedQuickSwitchMenu) {
         return;
     }
     [self handle:self.handle didLongPress:recognizer];
