@@ -34,6 +34,11 @@ SCHEME_LDFLAGS = -undefined dynamic_lookup -Wl,-w -Wl,-dead_strip
 PullOverX_FILES = $(filter-out PullOverX/POCameraCompatibility.m,$(wildcard PullOverX/*.m PullOverX/*.mm)) POLocalization.m
 PullOverX_INSTALL_PATH = /Library/MobileSubstrate/DynamicLibraries
 PullOverX_CFLAGS = -fobjc-arc
+# OBJCCFLAGS 只作用于 .mm 编译（rules.mk 的 ALL_OBJCCFLAGS）；旧版 Apple clang
+# （如 CI 上 Xcode 15）对 Obj-C++ 默认 gnu++98，range-based for 等会触发
+# -Wc++11-extensions 并被 theos 默认 -Werror 升级为错误，这里显式固定标准。
+# 不能放进共用的 CFLAGS：-std=c++* 传给 .m 文件会报 invalid argument。
+PullOverX_OBJCCFLAGS = -std=gnu++17
 PullOverX_LDFLAGS = $(SCHEME_LDFLAGS) -lroothide
 
 # 相机兼容 dylib:MSHookMessageEx 显式链 substrate(与 build.sh 相同)。
