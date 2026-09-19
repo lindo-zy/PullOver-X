@@ -2,6 +2,7 @@
 
 #import <dlfcn.h>
 #import <objc/message.h>
+#import <SpringBoard/SBActivationSettings.h>
 
 #import "ContextHostManager.h"
 #import "POApplicationHelper.h"
@@ -173,6 +174,10 @@ static BOOL POExternalIsUserApplicationBundleIdentifier(NSString *bundleId) {
         [POApplicationHelper isUserFacingApplicationBundleId:bundleId];
 }
 
+static BOOL POExternalIsTrustedInteractiveSystemSource(NSString *bundleId) {
+    return [bundleId isEqualToString:@"com.apple.Spotlight"];
+}
+
 static NSString *POExternalAttributedUserSourceBundleIdentifier(NSString *directSourceBundleId,
                                                                  NSString *payloadSourceBundleId,
                                                                  NSURL *openURL,
@@ -180,7 +185,13 @@ static NSString *POExternalAttributedUserSourceBundleIdentifier(NSString *direct
     if (POExternalIsUserApplicationBundleIdentifier(directSourceBundleId)) {
         return directSourceBundleId;
     }
+    if (POExternalIsTrustedInteractiveSystemSource(directSourceBundleId)) {
+        return directSourceBundleId;
+    }
     if (POExternalIsUserApplicationBundleIdentifier(payloadSourceBundleId)) {
+        return payloadSourceBundleId;
+    }
+    if (POExternalIsTrustedInteractiveSystemSource(payloadSourceBundleId)) {
         return payloadSourceBundleId;
     }
     if (documentOpenRequest && openURL.isFileURL && directSourceBundleId.length > 0 &&
@@ -220,6 +231,105 @@ static id POExternalOptionsByAddingActivateSuspended(id options) {
     }
     if ([options isKindOfClass:[NSDictionary class]]) {
         return [mutableDictionary copy];
+    }
+    return nil;
+}
+
+static BOOL POExternalCanPrepareSuspendedActivationSettings(id activationSettings) {
+    return activationSettings != nil && (
+        [activationSettings respondsToSelector:@selector(setBool:forActivationSetting:)] ||
+        [activationSettings respondsToSelector:@selector(setObject:forActivationSetting:)] ||
+        [activationSettings respondsToSelector:@selector(setFlag:forActivationSetting:)]);
+}
+
+static NSUInteger POExternalSuspendedActivationSetting(id activationSettings,
+                                                       NSString **resolvedKeyDescription) {
+    SEL keyDescriptionSelector = @selector(keyDescriptionForSetting:);
+    if ([activationSettings respondsToSelector:keyDescriptionSelector]) {
+        for (NSUInteger setting = 0; setting < 128; setting++) {
+            @try {
+                id value = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+                    activationSettings, keyDescriptionSelector, setting);
+                if (![value isKindOfClass:[NSString class]]) {
+                    continue;
+                }
+                NSString *keyDescription = (NSString *)value;
+                if ([keyDescription.lowercaseString isEqualToString:@"suspended"]) {
+                    if (resolvedKeyDescription) {
+                        *resolvedKeyDescription = keyDescription;
+                    }
+                    return setting;
+                }
+            } @catch (__unused NSException *exception) {
+            }
+        }
+    }
+    if (resolvedKeyDescription) {
+        *resolvedKeyDescription = @"fallback-header-value";
+    }
+    return SBActivationSettingSuspended;
+}
+
+static BOOL POExternalPrepareSuspendedActivationSettings(id activationSettings) {
+    if (!POExternalCanPrepareSuspendedActivationSettings(activationSettings)) {
+        return NO;
+    }
+    @try {
+        NSString *keyDescription = nil;
+        NSUInteger suspendedSetting = POExternalSuspendedActivationSetting(
+            activationSettings, &keyDescription);
+        if ([activationSettings respondsToSelector:@selector(setBool:forActivationSetting:)]) {
+            ((void (*)(id, SEL, BOOL, NSUInteger))objc_msgSend)(
+                activationSettings,
+                @selector(setBool:forActivationSetting:),
+                YES,
+                suspendedSetting);
+        } else if ([activationSettings respondsToSelector:@selector(setObject:forActivationSetting:)]) {
+            ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+                activationSettings,
+                @selector(setObject:forActivationSetting:),
+                @YES,
+                suspendedSetting);
+        } else {
+            // BSSettingFlagYes is represented by 2 (0 = default, 1 = no).
+            ((void (*)(id, SEL, NSInteger, NSUInteger))objc_msgSend)(
+                activationSettings,
+                @selector(setFlag:forActivationSetting:),
+                2,
+                suspendedSetting);
+        }
+        BOOL effective = YES;
+        SEL readSelector = @selector(boolForActivationSetting:);
+        if ([activationSettings respondsToSelector:readSelector]) {
+            effective = ((BOOL (*)(id, SEL, NSUInteger))objc_msgSend)(
+                activationSettings, readSelector, suspendedSetting);
+        }
+        return effective;
+    } @catch (__unused NSException *exception) {
+        return NO;
+    }
+}
+
+static id POExternalActivationSettingsByAddingSuspended(id activationSettings) {
+    if (!activationSettings) {
+        return nil;
+    }
+    if (POExternalPrepareSuspendedActivationSettings(activationSettings)) {
+        return activationSettings;
+    }
+
+    SEL mutableCopySelector = @selector(mutableCopy);
+    if (![activationSettings respondsToSelector:mutableCopySelector]) {
+        return nil;
+    }
+    @try {
+        id mutableActivationSettings =
+            ((id (*)(id, SEL))objc_msgSend)(activationSettings, mutableCopySelector);
+        if (mutableActivationSettings != activationSettings &&
+            POExternalPrepareSuspendedActivationSettings(mutableActivationSettings)) {
+            return mutableActivationSettings;
+        }
+    } @catch (__unused NSException *exception) {
     }
     return nil;
 }
@@ -288,6 +398,43 @@ static BOOL POExternalTransitionContainsBundleIdentifier(id transitionRequest,
         if ([POExternalBundleIdentifier(application) isEqualToString:bundleId]) {
             return YES;
         }
+    }
+    return NO;
+}
+
+static id POExternalActivationSettingsFromSceneEntity(id entity) {
+    for (NSString *selectorName in @[@"activationSettings", @"activation"]) {
+        id activationSettings = POExternalReadObject(entity, NSSelectorFromString(selectorName));
+        if (POExternalCanPrepareSuspendedActivationSettings(activationSettings)) {
+            return activationSettings;
+        }
+    }
+    for (NSString *key in @[@"activationSettings", @"activation"]) {
+        @try {
+            id activationSettings = [entity valueForKey:key];
+            if (POExternalCanPrepareSuspendedActivationSettings(activationSettings)) {
+                return activationSettings;
+            }
+        } @catch (__unused NSException *exception) {
+        }
+    }
+    return nil;
+}
+
+static BOOL POExternalPrepareSuspendedTransitionRequest(id transitionRequest,
+                                                        NSString *targetBundleId) {
+    id entities = POExternalReadObject(transitionRequest,
+                                       NSSelectorFromString(@"toApplicationSceneEntities"));
+    if (![entities respondsToSelector:@selector(objectEnumerator)]) {
+        return NO;
+    }
+    for (id entity in [entities objectEnumerator]) {
+        id application = POExternalReadObject(entity, NSSelectorFromString(@"application"));
+        if (![POExternalBundleIdentifier(application) isEqualToString:targetBundleId]) {
+            continue;
+        }
+        id activationSettings = POExternalActivationSettingsFromSceneEntity(entity);
+        return POExternalPrepareSuspendedActivationSettings(activationSettings);
     }
     return NO;
 }
@@ -418,13 +565,17 @@ static BOOL POExternalTransitionContainsBundleIdentifier(id transitionRequest,
     NSString *nativeSourceBundleId = POExternalAttributedUserSourceBundleIdentifier(
         directSourceBundleId, payloadSourceBundleId, openURL, documentOpenRequest);
     SEL trustedSelector = NSSelectorFromString(@"isTrusted");
-    if (![POApplicationHelper isExternalURLRoutingTargetBundleId:targetBundleId] ||
-        nativeSourceBundleId.length == 0 ||
-        [targetBundleId isEqualToString:nativeSourceBundleId] ||
-        !POExternalPullOverIsStableClosed() ||
-        ![request respondsToSelector:trustedSelector] ||
-        !((BOOL (*)(id, SEL))objc_msgSend)(request, trustedSelector) ||
-        !POExternalCanPrepareSuspendedOpenRequest(request)) {
+    BOOL routingTarget = [POApplicationHelper isExternalURLRoutingTargetBundleId:targetBundleId];
+    BOOL stableClosed = POExternalPullOverIsStableClosed();
+    BOOL hasTrustedSelector = [request respondsToSelector:trustedSelector];
+    BOOL trusted = hasTrustedSelector &&
+        ((BOOL (*)(id, SEL))objc_msgSend)(request, trustedSelector);
+    SEL setTrustedSelector = NSSelectorFromString(@"setTrusted:");
+    BOOL canPromoteTrusted = [request respondsToSelector:setTrustedSelector];
+    BOOL canPrepareOptions = POExternalCanPrepareSuspendedOpenRequest(request);
+    if (!routingTarget || nativeSourceBundleId.length == 0 ||
+        [targetBundleId isEqualToString:nativeSourceBundleId] || !stableClosed ||
+        (!trusted && !canPromoteTrusted) || !canPrepareOptions) {
         return completion;
     }
 
@@ -435,6 +586,9 @@ static BOOL POExternalTransitionContainsBundleIdentifier(id transitionRequest,
     if (!POExternalPrepareSuspendedOpenRequest(request)) {
         [self finishNativeRouteForGeneration:self.nativeRouteGeneration];
         return completion;
+    }
+    if (!trusted) {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(request, setTrustedSelector, YES);
     }
 
     NSUInteger nativeGeneration = self.nativeRouteGeneration;
@@ -452,11 +606,16 @@ static BOOL POExternalTransitionContainsBundleIdentifier(id transitionRequest,
 
 - (id)prepareTrustedWorkspaceOpenApplication:(id)application
                                      options:(id)options
+                          activationSettings:(id)activationSettings
                                       origin:(id)origin
                                       result:(id)result
-                                routedResult:(id __autoreleasing *)routedResult {
+                                routedResult:(id __autoreleasing *)routedResult
+                    routedActivationSettings:(id __autoreleasing *)routedActivationSettings {
     if (routedResult) {
         *routedResult = result;
+    }
+    if (routedActivationSettings) {
+        *routedActivationSettings = activationSettings;
     }
     if (!NSThread.isMainThread || !application || !options || ![POApplicationHelper isEnabled]) {
         return options;
@@ -469,6 +628,22 @@ static BOOL POExternalTransitionContainsBundleIdentifier(id transitionRequest,
     if (!POExternalIsUserApplicationBundleIdentifier(targetBundleId) ||
         !POExternalIsValidURL(openURL)) {
         return options;
+    }
+
+    // FBS first enters the system-service request hook and then re-enters this
+    // trusted hook for the same open. The first hook owns the completion and
+    // marks the route in flight; the second hook still owns the activation
+    // settings that decide whether SpringBoard builds a foreground workspace
+    // transition. Do not treat that re-entry as a competing route.
+    if (self.nativeRouteInFlight &&
+        [self.pendingNativeTargetBundleId isEqualToString:targetBundleId]) {
+        id preparedOptions = POExternalOptionsByAddingActivateSuspended(options);
+        id preparedActivationSettings =
+            POExternalActivationSettingsByAddingSuspended(activationSettings);
+        if (routedActivationSettings && preparedActivationSettings) {
+            *routedActivationSettings = preparedActivationSettings;
+        }
+        return preparedOptions && preparedActivationSettings ? preparedOptions : options;
     }
 
     NSDictionary *openOptions = POExternalOptionsDictionary(options);
@@ -494,8 +669,13 @@ static BOOL POExternalTransitionContainsBundleIdentifier(id transitionRequest,
         if (!((!originIsBroker && !payloadSourceIsBroker) ||
               originIsUserApplication || !payloadAttributableToHostedFlow)) {
             id preparedOptions = POExternalOptionsByAddingActivateSuspended(options);
-            if (!preparedOptions) {
+            id preparedActivationSettings =
+                POExternalActivationSettingsByAddingSuspended(activationSettings);
+            if (!preparedOptions || !preparedActivationSettings) {
                 return options;
+            }
+            if (routedActivationSettings) {
+                *routedActivationSettings = preparedActivationSettings;
             }
 
             NSUInteger hostGeneration = manager.activeLeaseGeneration;
@@ -533,10 +713,13 @@ static BOOL POExternalTransitionContainsBundleIdentifier(id transitionRequest,
 
     NSString *nativeSourceBundleId = POExternalAttributedUserSourceBundleIdentifier(
         originBundleId, payloadSourceBundleId, openURL, documentOpenRequest);
-    if (![POApplicationHelper isExternalURLRoutingTargetBundleId:targetBundleId] ||
-        nativeSourceBundleId.length == 0 ||
-        [targetBundleId isEqualToString:nativeSourceBundleId] ||
-        !POExternalPullOverIsStableClosed()) {
+    BOOL routingTarget = [POApplicationHelper isExternalURLRoutingTargetBundleId:targetBundleId];
+    BOOL stableClosed = POExternalPullOverIsStableClosed();
+    BOOL canPrepareActivation = POExternalCanPrepareSuspendedActivationSettings(activationSettings) ||
+        [activationSettings respondsToSelector:@selector(mutableCopy)];
+    if (!routingTarget || nativeSourceBundleId.length == 0 ||
+        [targetBundleId isEqualToString:nativeSourceBundleId] || !stableClosed ||
+        !canPrepareActivation) {
         return options;
     }
 
@@ -546,9 +729,14 @@ static BOOL POExternalTransitionContainsBundleIdentifier(id transitionRequest,
     }
 
     id preparedOptions = POExternalOptionsByAddingActivateSuspended(options);
-    if (!preparedOptions) {
+    id preparedActivationSettings =
+        POExternalActivationSettingsByAddingSuspended(activationSettings);
+    if (!preparedOptions || !preparedActivationSettings) {
         [self finishNativeRouteForGeneration:self.nativeRouteGeneration];
         return options;
+    }
+    if (routedActivationSettings) {
+        *routedActivationSettings = preparedActivationSettings;
     }
 
     NSUInteger nativeGeneration = self.nativeRouteGeneration;
@@ -666,6 +854,7 @@ static BOOL POExternalTransitionContainsBundleIdentifier(id transitionRequest,
     NSString *pendingTargetBundleId = self.pendingNativeTargetBundleId;
     if (self.nativeRouteInFlight &&
         POExternalTransitionContainsBundleIdentifier(transitionRequest, pendingTargetBundleId)) {
+        POExternalPrepareSuspendedTransitionRequest(transitionRequest, pendingTargetBundleId);
         return;
     }
 

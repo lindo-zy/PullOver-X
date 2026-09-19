@@ -15,6 +15,9 @@
 @end
 
 static NSString * const POEnabledPendingRespringKey = @"enabled-respring-pending";
+static CFStringRef const POSettingsSuiteIdentifier = CFSTR("com.mlgm.pulloverx");
+static CFStringRef const POExternalURLRoutingEnabledKey = CFSTR("externalURLRoutingEnabled");
+static CFStringRef const POExternalURLRoutingBlacklistKey = CFSTR("externalURLRoutingBlacklist");
 static NSDictionary *POCachedSettings;
 static NSSet<NSString *> *POExternalURLRoutingBlacklist;
 static BOOL PORuntimeEnabled;
@@ -345,6 +348,10 @@ static id POSharedObjectForClass(Class cls) {
     }
 }
 + (void)reloadSettings {
+    // The preferences UI runs in a different process. Force cfprefsd to merge
+    // its latest domain before rebuilding SpringBoard's routing snapshot so a
+    // newly introduced list key is effective without first toggling the list.
+    CFPreferencesAppSynchronize(POSettingsSuiteIdentifier);
     @synchronized (self) {
         NSDictionary *snapshot = [[self settingsDefaults] dictionaryRepresentation];
         BOOL pendingRespring = [snapshot[POEnabledPendingRespringKey] boolValue];
@@ -361,20 +368,55 @@ static id POSharedObjectForClass(Class cls) {
         [self updateExternalURLRoutingCacheWithSettings:POCachedSettings];
     }
 }
+
++ (void)reloadExternalURLRoutingSettingsFromPersistentDomain {
+    // NSUserDefaults keeps a per-process search-list cache. A Darwin
+    // notification invalidates that cache, which is why changing one item in
+    // AltList made routing suddenly start working. Read the two routing keys
+    // through CFPreferences directly so the first URL after a respring sees
+    // the persisted domain even when no list notification has happened yet.
+    CFPreferencesAppSynchronize(POSettingsSuiteIdentifier);
+    id rawEnabled = CFBridgingRelease(CFPreferencesCopyAppValue(
+        POExternalURLRoutingEnabledKey, POSettingsSuiteIdentifier));
+    id rawBlacklist = CFBridgingRelease(CFPreferencesCopyAppValue(
+        POExternalURLRoutingBlacklistKey, POSettingsSuiteIdentifier));
+
+    BOOL routingEnabled = [rawEnabled respondsToSelector:@selector(boolValue)]
+        ? [rawEnabled boolValue]
+        : NO;
+    NSArray *blacklist = [rawBlacklist isKindOfClass:[NSArray class]]
+        ? rawBlacklist
+        : @[];
+
+    @synchronized (self) {
+        NSMutableDictionary *effectiveSettings = POCachedSettings
+            ? [POCachedSettings mutableCopy]
+            : [[[self settingsDefaults] dictionaryRepresentation] mutableCopy];
+        effectiveSettings[@"externalURLRoutingEnabled"] = @(routingEnabled);
+        effectiveSettings[@"externalURLRoutingBlacklist"] = blacklist;
+        POCachedSettings = [effectiveSettings copy];
+        [self updateExternalURLRoutingCacheWithSettings:POCachedSettings];
+    }
+}
+
 + (BOOL)isEnabled {
     return [[self settings][@"enabled"] boolValue];
 }
 
 + (BOOL)isExternalURLRoutingEnabled {
+    [self reloadExternalURLRoutingSettingsFromPersistentDomain];
     return [[self settings][@"externalURLRoutingEnabled"] boolValue];
 }
 
 + (BOOL)isExternalURLRoutingTargetBundleId:(NSString *)bundleId {
-    if (bundleId.length == 0 || ![self isExternalURLRoutingEnabled]) {
+    if (bundleId.length == 0) {
         return NO;
     }
+    [self reloadExternalURLRoutingSettingsFromPersistentDomain];
     @synchronized (self) {
-        return ![POExternalURLRoutingBlacklist containsObject:bundleId];
+        BOOL shouldRoute = [POCachedSettings[@"externalURLRoutingEnabled"] boolValue] &&
+            ![POExternalURLRoutingBlacklist containsObject:bundleId];
+        return shouldRoute;
     }
 }
 

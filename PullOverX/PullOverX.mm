@@ -934,15 +934,19 @@ static void POHookSBMainWorkspaceHandleTrustedOpenApplicationRequest(id self, SE
         return;
     }
     id routedResult = result;
+    id routedActivationSettings = activationSettings;
     id routedOptions = [[POExternalActivationCoordinator sharedInstance]
         prepareTrustedWorkspaceOpenApplication:application
                                       options:options
+                           activationSettings:activationSettings
                                        origin:origin
                                        result:result
-                                 routedResult:&routedResult];
+                                 routedResult:&routedResult
+                     routedActivationSettings:&routedActivationSettings];
     POOriginalSBMainWorkspaceHandleTrustedOpenApplicationRequest(self, _cmd, application,
                                                                  routedOptions ?: options,
-                                                                 activationSettings, origin,
+                                                                 routedActivationSettings ?: activationSettings,
+                                                                 origin,
                                                                  routedResult ?: result);
 }
 
