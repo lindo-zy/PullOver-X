@@ -13,8 +13,8 @@
 "Behavior" = "Behavior";
 "When Landscape" = "When Landscape";
 "URL Routing" = "URL Routing";
-"URL Routing Whitelist" = "URL Routing Whitelist";
-"Only whitelisted target apps open in PullOver X when launched by another native app through a URL or Open In." = "Only whitelisted target apps open in PullOver X when launched by another native app through a URL or Open In.";
+"URL Routing Blacklist" = "URL Routing Blacklist";
+"All target apps open in PullOver X by default when launched by another native app through a URL or Open In. Apps selected in URL Routing Blacklist are not taken over and open normally." = "All target apps open in PullOver X by default when launched by another native app through a URL or Open In. Apps selected in URL Routing Blacklist are not taken over and open normally.";
 "Rotate" = "Rotate";
 "Lock" = "Lock";
 "Hide" = "Hide";

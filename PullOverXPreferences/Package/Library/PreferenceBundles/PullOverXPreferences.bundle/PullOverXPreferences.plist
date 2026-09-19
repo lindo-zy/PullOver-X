@@ -226,7 +226,7 @@
 			<key>label</key>
 			<string>Behavior</string>
 			<key>footerText</key>
-			<string>Only whitelisted target apps open in PullOver X when launched by another native app through a URL or Open In.</string>
+			<string>All target apps open in PullOver X by default when launched by another native app through a URL or Open In. Apps selected in URL Routing Blacklist are not taken over and open normally.</string>
 		</dict>
 		<dict>
 			<key>cellClass</key>
@@ -346,9 +346,9 @@
 			<key>detail</key>
 			<string>ATLApplicationListMultiSelectionController</string>
 			<key>key</key>
-			<string>externalURLRoutingWhitelist</string>
+			<string>externalURLRoutingBlacklist</string>
 			<key>label</key>
-			<string>URL Routing Whitelist</string>
+			<string>URL Routing Blacklist</string>
 			<key>sections</key>
 			<array>
 				<dict>

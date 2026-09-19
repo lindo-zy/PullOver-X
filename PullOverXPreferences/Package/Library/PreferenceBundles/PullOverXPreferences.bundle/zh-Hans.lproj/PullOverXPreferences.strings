@@ -13,8 +13,8 @@
 "Behavior" = "行为";
 "When Landscape" = "横屏时";
 "URL Routing" = "URL跳转";
-"URL Routing Whitelist" = "URL跳转白名单";
-"Only whitelisted target apps open in PullOver X when launched by another native app through a URL or Open In." = "只有白名单中的目标应用，才会在被其他原生应用通过 URL 或“打开方式”启动时进入 PullOver X。";
+"URL Routing Blacklist" = "URL跳转黑名单";
+"All target apps open in PullOver X by default when launched by another native app through a URL or Open In. Apps selected in URL Routing Blacklist are not taken over and open normally." = "所有目标应用默认都会在被其他原生应用通过 URL 或“打开方式”启动时进入 PullOver X；黑名单中的应用不会被接管，照常正常打开。";
 "Rotate" = "旋转";
 "Lock" = "竖屏";
 "Hide" = "隐藏";

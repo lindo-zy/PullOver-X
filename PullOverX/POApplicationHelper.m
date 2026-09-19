@@ -16,7 +16,7 @@
 
 static NSString * const POEnabledPendingRespringKey = @"enabled-respring-pending";
 static NSDictionary *POCachedSettings;
-static NSSet<NSString *> *POExternalURLRoutingWhitelist;
+static NSSet<NSString *> *POExternalURLRoutingBlacklist;
 static BOOL PORuntimeEnabled;
 static BOOL PORuntimeEnabledInitialized;
 
@@ -138,16 +138,16 @@ static id POSharedObjectForClass(Class cls) {
 @implementation POApplicationHelper
 
 + (void)updateExternalURLRoutingCacheWithSettings:(NSDictionary *)settings {
-    id rawWhitelist = settings[@"externalURLRoutingWhitelist"];
-    NSMutableSet<NSString *> *whitelist = [NSMutableSet set];
-    if ([rawWhitelist isKindOfClass:[NSArray class]]) {
-        for (id value in (NSArray *)rawWhitelist) {
+    id rawBlacklist = settings[@"externalURLRoutingBlacklist"];
+    NSMutableSet<NSString *> *blacklist = [NSMutableSet set];
+    if ([rawBlacklist isKindOfClass:[NSArray class]]) {
+        for (id value in (NSArray *)rawBlacklist) {
             if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
-                [whitelist addObject:value];
+                [blacklist addObject:value];
             }
         }
     }
-    POExternalURLRoutingWhitelist = [whitelist copy];
+    POExternalURLRoutingBlacklist = [blacklist copy];
 }
 
 +(NSArray<NSString *> *)recentAppsWithCount:(int)count{
@@ -319,7 +319,7 @@ static id POSharedObjectForClass(Class cls) {
             @"nubHiddenPercentage": @67,
             @"landscapeBehavior": @"rotate",
             @"externalURLRoutingEnabled": @NO,
-            @"externalURLRoutingWhitelist": @[],
+            @"externalURLRoutingBlacklist": @[],
             @"hapticFeedback": @YES,
             @"soundFeedback": @YES,
             @"keyboardAvoiding": @YES,
@@ -374,7 +374,7 @@ static id POSharedObjectForClass(Class cls) {
         return NO;
     }
     @synchronized (self) {
-        return [POExternalURLRoutingWhitelist containsObject:bundleId];
+        return ![POExternalURLRoutingBlacklist containsObject:bundleId];
     }
 }
 
