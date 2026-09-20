@@ -82,6 +82,8 @@
     BOOL hapticsEnabled;
     POAppRailTile *sideSwitchButton;
     BOOL sideSwitchEnabled;
+    BOOL centeredIcons;
+    CGFloat lastCenteredLayoutHeight;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -171,6 +173,7 @@
     tileSide = MAX(1, tileSize);
     activeBundleId = [newActiveBundleId copy];
     hapticsEnabled = [[POApplicationHelper settings][@"hapticFeedback"] boolValue];
+    centeredIcons = [[POApplicationHelper settings][@"railExpandCentered"] boolValue];
     [self reloadSideSwitchButton];
 
     for (POAppRailTile *tile in tiles) {
@@ -204,21 +207,40 @@
 
 - (void)layoutTiles {
     NSUInteger count = tiles.count;
-    CGFloat contentHeight = tileSide * count + PO_APP_RAIL_TILE_GAP * MAX(0, (NSInteger)count - 1);
+    CGFloat bottomInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
+    CGFloat contentHeight;
+    // 居中展开:第一个图标钉在竖栏顶部,其余图标从可视区垂直中点开始往下排。
+    CGFloat middleOriginY = 0;
+    if (centeredIcons && count > 1) {
+        middleOriginY = floor(CGRectGetHeight(self.bounds) / 2.0);
+        CGFloat middleHeight = tileSide * (count - 1) + PO_APP_RAIL_TILE_GAP * (count - 2);
+        contentHeight = MAX(tileSide, middleOriginY + middleHeight);
+    } else {
+        contentHeight = tileSide * count + PO_APP_RAIL_TILE_GAP * MAX(0, (NSInteger)count - 1);
+    }
     self.contentSize = CGSizeMake(tileSide, contentHeight);
     // 换边按钮固定在竖栏底部不随内容滚动,底部内边距让最后的图标可以滚到按钮上方。
-    CGFloat bottomInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
     self.contentInset = UIEdgeInsetsMake(0, 0, bottomInset, 0);
     self.scrollEnabled = contentHeight + bottomInset > CGRectGetHeight(self.bounds) + 0.5;
     for (NSUInteger index = 0; index < count; index++) {
         POAppRailTile *tile = tiles[index];
-        tile.frame = CGRectMake(0, tileSide * index + PO_APP_RAIL_TILE_GAP * index, tileSide, tileSide);
+        CGFloat tileY = tileSide * index + PO_APP_RAIL_TILE_GAP * index;
+        if (index > 0 && middleOriginY > 0) {
+            tileY = middleOriginY + tileSide * (index - 1) + PO_APP_RAIL_TILE_GAP * (index - 1);
+        }
+        tile.frame = CGRectMake(0, tileY, tileSide, tileSide);
         [tile setHighlighted:[tile.bundleId isEqualToString:activeBundleId]];
     }
+    lastCenteredLayoutHeight = CGRectGetHeight(self.bounds);
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
+    // 居中布局里"其余图标"的起点取决于可视区高度;reload 时 frame 还没定,
+    // 控制器定完 frame 后这里按最新高度重排一次,首秀和旋转都靠这一步纠正。
+    if (centeredIcons && CGRectGetHeight(self.bounds) != lastCenteredLayoutHeight) {
+        [self layoutTiles];
+    }
     CGFloat bottomInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
     self.scrollEnabled = self.contentSize.height + bottomInset > CGRectGetHeight(self.bounds) + 0.5;
     if (sideSwitchButton) {

@@ -3246,7 +3246,14 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     CGFloat margin = 10.0;
     CGFloat topLimit = self.view.safeAreaInsets.top + margin;
     CGFloat bottomLimit = CGRectGetHeight(self.view.bounds) - self.view.safeAreaInsets.bottom - margin;
-    CGFloat railHeight = MIN(appRailView.preferredContentSize.height, MAX(0, bottomLimit - topLimit));
+    CGFloat railHeight;
+    if ([[POApplicationHelper settings][@"railExpandCentered"] boolValue]) {
+        // 把手展开居中:竖栏占满上下可用空间,顶部图标与中部图标组都相对屏幕定位,
+        // 竖栏顶部因此被钳在 topLimit,与 POAppRailView 里按可视区中点排图标配套。
+        railHeight = MAX(0, bottomLimit - topLimit);
+    } else {
+        railHeight = MIN(appRailView.preferredContentSize.height, MAX(0, bottomLimit - topLimit));
+    }
     railHeight = MAX(railHeight, tileSize);
     CGFloat railY = CGRectGetMidY(handleFrame) - railHeight / 2.0;
     railY = MIN(MAX(railY, topLimit), MAX(topLimit, bottomLimit - railHeight));

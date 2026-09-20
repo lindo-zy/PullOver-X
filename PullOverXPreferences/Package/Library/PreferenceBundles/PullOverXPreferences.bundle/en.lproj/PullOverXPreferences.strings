@@ -26,6 +26,8 @@
 "Enlarge Keyboard in Landscape" = "Enlarge Keyboard in Landscape";
 "Handle" = "Handle";
 "Handle Side Switch" = "Handle Side Switch";
+"Center Rail on Expand" = "Center Rail on Expand";
+"When enabled, the app rail spans from the top of the screen to the bottom: the first icon stays at the top and the remaining icons move down to the vertical middle. When you switch apps, the tapped app's icon returns to the top." = "When enabled, the app rail spans from the top of the screen to the bottom: the first icon stays at the top and the remaining icons move down to the vertical middle. When you switch apps, the tapped app's icon returns to the top.";
 "Handle Activation Guard" = "Handle Activation Guard";
 "Auto-Nub Handle when Inactive" = "Auto-Nub Handle when Inactive";
 "Handle Size" = "Handle Size";

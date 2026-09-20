@@ -26,6 +26,8 @@
 "Enlarge Keyboard in Landscape" = "横屏放大键盘";
 "Handle" = "把手";
 "Handle Side Switch" = "把手左右切换";
+"Center Rail on Expand" = "把手展开居中";
+"When enabled, the app rail spans from the top of the screen to the bottom: the first icon stays at the top and the remaining icons move down to the vertical middle. When you switch apps, the tapped app's icon returns to the top." = "开启后，竖栏上下撑满屏幕：第一个图标保持在顶部，其余图标下移到屏幕中部；切换应用后，所点应用的图标回到顶部。";
 "Handle Activation Guard" = "把手防误触";
 "Auto-Nub Handle when Inactive" = "不活动时自动收起把手";
 "Handle Size" = "把手大小";

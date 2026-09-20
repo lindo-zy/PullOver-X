@@ -317,6 +317,7 @@ static id POSharedObjectForClass(Class cls) {
             @"style": @"Recent Apps",
             @"leftHanded": @NO,
             @"railSideSwitch": @YES,
+            @"railExpandCentered": @YES,
             @"hideOnScreenshot": @YES,
             @"hideLabels": @NO,
             @"handleSize": @34,

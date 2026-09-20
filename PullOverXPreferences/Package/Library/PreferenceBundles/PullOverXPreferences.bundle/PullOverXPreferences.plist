@@ -425,6 +425,32 @@
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>default</key>
+			<true/>
+			<key>key</key>
+			<string>railExpandCentered</string>
+			<key>label</key>
+			<string>Center Rail on Expand</string>
+			<key>defaults</key>
+			<string>com.mlgm.pulloverx</string>
+			<key>set</key>
+			<string>setValue:forSpecifier:</string>
+			<key>get</key>
+			<string>getValueForSpecifier:</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>isStaticText</key>
+			<true/>
+			<key>label</key>
+			<string></string>
+			<key>footerText</key>
+			<string>When enabled, the app rail spans from the top of the screen to the bottom: the first icon stays at the top and the remaining icons move down to the vertical middle. When you switch apps, the tapped app's icon returns to the top.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
 			<false/>
 			<key>key</key>
 			<string>handleActivationGuard</string>
