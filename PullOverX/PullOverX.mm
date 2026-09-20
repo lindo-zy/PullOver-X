@@ -118,7 +118,7 @@ static void POReconcileCommittedInterfaceOrientation(NSString *trigger,
 
 static CFStringRef const kPOSettingsChangedNotification = CFSTR("com.mlgm.pulloverx.settings-changed");
 
-// 其他插件通过该 Darwin 通知唤醒把手/小窗:面板展开时收起,缩点把手时展开。
+// 其他插件通过该 Darwin 通知唤醒把手:仅在缩点态时展开把手,其余状态不做动作。
 // notify_register_dispatch 收 C 字符串,常量直接用 const char *。
 static const char * const kPOExternalWakeNotificationName = "com.mlgm.pulloverx.external-wake";
 // 防抖窗口:窗口内的重复信号(不同插件齐发、连发)一律吞掉,避免面板来回翻。

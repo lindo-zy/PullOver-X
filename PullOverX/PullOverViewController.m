@@ -3088,17 +3088,13 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
 }
 
-// 外部 Darwin 通知唤醒:面板展开时收起面板;缩点把手时展开把手并唤出常驻竖栏;
-// 把手正常显示、面板关闭时不做动作。守卫与竖栏展开复用点击缩点把手的那条路径。
+// 外部 Darwin 通知唤醒:仅当把手处于缩点态时展开把手并唤出常驻竖栏;
+// 其余状态(面板展开、把手正常显示)不做动作。守卫与竖栏展开复用点击缩点把手的那条路径。
 -(void)applyExternalWakeRequest{
     if ([self isPanelTransitioning] || scrollView.dragging || scrollView.decelerating) {
         return;
     }
-    if (panelState != POPanelStateClosed) {
-        [self close];
-        return;
-    }
-    if (![self isHandleVisiblyNubbed]) {
+    if (panelState != POPanelStateClosed || ![self isHandleVisiblyNubbed]) {
         return;
     }
     [self cancelAutoNubTimer];

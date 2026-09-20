@@ -15,7 +15,7 @@
 "URL Routing" = "URL Routing";
 "URL Routing Blacklist" = "URL Routing Blacklist";
 "External Wake" = "External Wake";
-"When enabled, other tweaks can reveal the nubbed handle or close the panel by posting the Darwin notification com.mlgm.pulloverx.external-wake." = "When enabled, other tweaks can reveal the nubbed handle or close the panel by posting the Darwin notification com.mlgm.pulloverx.external-wake.";
+"When enabled, other tweaks can reveal the nubbed handle (with the app rail) by posting the Darwin notification com.mlgm.pulloverx.external-wake. It does nothing while the panel is open." = "When enabled, other tweaks can reveal the nubbed handle (with the app rail) by posting the Darwin notification com.mlgm.pulloverx.external-wake. It does nothing while the panel is open.";
 "All target apps open in PullOver X by default when launched by another native app through a URL or Open In. Apps selected in URL Routing Blacklist are not taken over and open normally." = "All target apps open in PullOver X by default when launched by another native app through a URL or Open In. Apps selected in URL Routing Blacklist are not taken over and open normally.";
 "Rotate" = "Rotate";
 "Lock" = "Lock";

@@ -11,7 +11,7 @@ Other tweaks can wake the PullOver X handle/panel by posting the Darwin notifica
 com.mlgm.pulloverx.external-wake
 ```
 
-Behavior: when the panel is open, it closes; when the handle is nubbed (shrunk), it expands (with the app rail). Otherwise nothing happens.
+Behavior: when the handle is nubbed (shrunk), it expands (with the app rail). Nothing happens while the panel is open or the handle is already visible.
 
 Any process can post it, e.g. from C/ObjC:
 

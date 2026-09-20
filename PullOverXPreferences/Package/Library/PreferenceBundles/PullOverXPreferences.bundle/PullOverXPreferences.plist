@@ -395,7 +395,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>When enabled, other tweaks can reveal the nubbed handle or close the panel by posting the Darwin notification com.mlgm.pulloverx.external-wake.</string>
+			<string>When enabled, other tweaks can reveal the nubbed handle (with the app rail) by posting the Darwin notification com.mlgm.pulloverx.external-wake. It does nothing while the panel is open.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
