@@ -160,6 +160,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     CGFloat panelPanStartOffsetX;
     POHandlePanIntent handlePanIntent;
     BOOL handlePanStartedNubbed;
+    BOOL nubRevealRailActive;
     CGFloat panelVerticalMoveStartAnchorY;
     BOOL scrollSnapAnimationInProgress;
     BOOL quickSwitchOpeningApp;
@@ -3057,6 +3058,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         return;
     }
     deferredOpenGeneration += 1;
+    nubRevealRailActive = NO;
     [self cancelAutoNubTimer];
     [self removeKeyboardZoomSuspension:POKeyboardZoomSuspensionClosing];
     [self beginSplitSessionIfNeeded];
@@ -3089,17 +3091,27 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 
 #pragma mark - AppRail
 
-// 小窗完全打开且无任何菜单/过渡时,把手一列展开为常驻应用竖栏。
+// 小窗完全打开且无任何菜单/过渡时,把手一列展开为常驻应用竖栏;
+// 小窗关闭时,点击隐藏把手唤出的常驻竖栏同样保持展开,直到再次隐藏把手或打开小窗。
 -(BOOL)shouldShowAppRail{
-    return appRailView &&
-        panelState == POPanelStateOpen &&
-        !presentedQuickSwitchMenu &&
-        !scrollSnapAnimationInProgress && !scrollView.dragging && !scrollView.decelerating &&
-        self.handle.layoutMode == POHandleLayoutModeVerticalRail &&
-        !scaledProgrammaticCloseAnimating &&
-        !hostedCategoryTransitionPending && !runtimeHostedCategoryTransitionAnimating &&
-        !handleVisualHandoffSnapshotView &&
-        !showingCantHost;
+    if (!appRailView ||
+        presentedQuickSwitchMenu ||
+        scrollSnapAnimationInProgress || scrollView.dragging || scrollView.decelerating ||
+        scaledProgrammaticCloseAnimating ||
+        hostedCategoryTransitionPending || runtimeHostedCategoryTransitionAnimating ||
+        handleVisualHandoffSnapshotView ||
+        showingCantHost) {
+        return NO;
+    }
+    if (panelState == POPanelStateOpen) {
+        return self.handle.layoutMode == POHandleLayoutModeVerticalRail;
+    }
+    if (panelState == POPanelStateClosed) {
+        return nubRevealRailActive &&
+            self.handle.layoutMode == POHandleLayoutModeVerticalRail &&
+            !self.handle.isNubbed;
+    }
+    return NO;
 }
 
 -(void)updateAppRailVisibilityAnimated:(BOOL)animated{
@@ -3196,6 +3208,15 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [self positionAppRail];
 }
 
+// 竖栏是否有可展示的图标,与 layoutAppRail 的列表口径保持一致。
+-(BOOL)railHasRecordedApps{
+    if ([POApplicationHelper quickSwitchBundleIdentifiers].count > 0) {
+        return YES;
+    }
+    return pinnedBundleId.length > 0 &&
+        [POApplicationHelper isUserFacingApplicationBundleId:pinnedBundleId];
+}
+
 -(void)positionAppRail{
     if (!appRailView || appRailView.hidden) {
         return;
@@ -3254,11 +3275,16 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         return;
     }
     if (panelState == POPanelStateClosed) {
-        if ([self isHandleActivationGuardActive]) {
+        if ([self isHandleVisiblyNubbed]) {
+            // 点击隐藏的小把手:显示把手并展开全部记录 APP 的竖栏,不直接打开小窗;
+            // 点选竖栏里的 APP 或拖拽把手才进入小窗,拖拽逻辑不变。
             self.handle.isNubbed = NO;
+            nubRevealRailActive = [self railHasRecordedApps];
             [self resetAutoNubTimerWithMinimumDelay:PO_HANDLE_GUARD_MINIMUM_REVEAL_DURATION];
+            [self updateAppRailVisibilityAnimated:YES];
             return;
         }
+        nubRevealRailActive = NO;
         [self open];
         return;
     }
@@ -3308,12 +3334,15 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
             case POHandlePanIntentNubHandle:
                 [self cancelAutoNubTimer];
                 self.handle.isNubbed = YES;
+                nubRevealRailActive = NO;
+                [self updateAppRailVisibilityAnimated:YES];
                 return;
 
             case POHandlePanIntentOpenPanel:
                 if ([self isHandleVisiblyNubbed]) {
                     self.handle.isNubbed = NO;
                 }
+                nubRevealRailActive = NO;
                 pendingOpenState = NO;
                 [self beginSplitSessionIfNeeded];
                 break;
@@ -4068,6 +4097,9 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     if (![self isHorizontalQuickSwitchLayoutMode] &&
         [[POApplicationHelper settings][@"autoNub"] boolValue] && ![self isPanelActive] && !self.handle.isNubbed) {
         [self.handle setIsNubbed:YES];
+        // 自动隐藏把手时,点击隐藏把手唤出的常驻竖栏一并收起。
+        nubRevealRailActive = NO;
+        [self updateAppRailVisibilityAnimated:YES];
     }
 }
 
