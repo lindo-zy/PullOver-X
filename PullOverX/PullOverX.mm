@@ -118,6 +118,12 @@ static void POReconcileCommittedInterfaceOrientation(NSString *trigger,
 
 static CFStringRef const kPOSettingsChangedNotification = CFSTR("com.mlgm.pulloverx.settings-changed");
 
+// 其他插件通过该 Darwin 通知唤醒把手/小窗:面板展开时收起,缩点把手时展开。
+// notify_register_dispatch 收 C 字符串,常量直接用 const char *。
+static const char * const kPOExternalWakeNotificationName = "com.mlgm.pulloverx.external-wake";
+// 防抖窗口:窗口内的重复信号(不同插件齐发、连发)一律吞掉,避免面板来回翻。
+static const NSTimeInterval POExternalWakeMinimumInterval = 1.0;
+
 static BOOL POSettingsEnabled(NSDictionary *settings) {
     id enabled = settings[@"enabled"];
     return enabled == nil || [enabled boolValue];
@@ -1234,6 +1240,33 @@ static void _logos_method$_ungrouped$SBHomeHardwareButton$singlePressUp$(
     }
 }
 
+static BOOL POExternalWakeEnabled(NSDictionary *settings) {
+    id enabled = settings[@"externalWakeEnabled"];
+    return enabled == nil || [enabled boolValue];
+}
+
+static NSTimeInterval POLastExternalWakeSignalAt = 0;
+
+static void PORegisterExternalWakeObserver(void) {
+    static dispatch_once_t onceToken;
+    static int token = 0;
+    dispatch_once(&onceToken, ^{
+        notify_register_dispatch(kPOExternalWakeNotificationName, &token, dispatch_get_main_queue(), ^(int __unused t) {
+            NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+            NSTimeInterval previous = POLastExternalWakeSignalAt;
+            POLastExternalWakeSignalAt = now;
+            if (now - previous < POExternalWakeMinimumInterval) {
+                return;
+            }
+            NSDictionary *settings = [POApplicationHelper settings];
+            if (!POSettingsEnabled(settings) || !POExternalWakeEnabled(settings)) {
+                return;
+            }
+            [window.controller applyExternalWakeRequest];
+        });
+    });
+}
+
 static void PORegisterScreenBlankObserver(void) {
     static dispatch_once_t onceToken;
     static int token = 0;
@@ -1256,6 +1289,8 @@ static __attribute__((constructor)) void POInstallSpringBoardHooks(int __unused 
         return;
     }
     POSetCameraForegroundGrantBundleIdentifier(nil);
+    // 外部唤醒观察者不随 ctor 时的 enabled 门控:开关在回调里实时读取,免 respring 生效。
+    PORegisterExternalWakeObserver();
     if (POSettingsEnabled([POApplicationHelper settings])) {
         PORegisterScreenBlankObserver();
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, POSettingsDidChange,

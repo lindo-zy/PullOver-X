@@ -14,6 +14,8 @@
 "When Landscape" = "横屏时";
 "URL Routing" = "URL跳转";
 "URL Routing Blacklist" = "URL跳转黑名单";
+"External Wake" = "外部唤醒";
+"When enabled, other tweaks can reveal the nubbed handle or close the panel by posting the Darwin notification com.mlgm.pulloverx.external-wake." = "开启后，其他插件可通过发送 Darwin 通知 com.mlgm.pulloverx.external-wake 展开缩点把手或收起小窗。";
 "All target apps open in PullOver X by default when launched by another native app through a URL or Open In. Apps selected in URL Routing Blacklist are not taken over and open normally." = "所有目标应用默认都会在被其他原生应用通过 URL 或“打开方式”启动时进入 PullOver X；黑名单中的应用不会被接管，照常正常打开。";
 "Rotate" = "旋转";
 "Lock" = "竖屏";

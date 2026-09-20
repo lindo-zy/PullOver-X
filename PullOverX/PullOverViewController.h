@@ -20,6 +20,7 @@
 
 -(void)close;
 -(void)forceCloseAndReleaseImmediately;
+-(void)applyExternalWakeRequest;
 -(void)prepareForNativeApplicationTakeover:(NSString *)bundleId;
 -(void)routeExternalApplicationInsidePullOver:(NSString *)bundleId;
 -(BOOL)openExternallyActivatedApplicationInPullOver:(NSString *)bundleId;

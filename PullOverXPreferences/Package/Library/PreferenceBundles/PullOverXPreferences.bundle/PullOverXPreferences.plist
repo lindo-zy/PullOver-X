@@ -373,6 +373,32 @@
 		</dict>
 		<dict>
 			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>key</key>
+			<string>externalWakeEnabled</string>
+			<key>label</key>
+			<string>External Wake</string>
+			<key>defaults</key>
+			<string>com.mlgm.pulloverx</string>
+			<key>set</key>
+			<string>setValue:forSpecifier:</string>
+			<key>get</key>
+			<string>getValueForSpecifier:</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>isStaticText</key>
+			<true/>
+			<key>label</key>
+			<string></string>
+			<key>footerText</key>
+			<string>When enabled, other tweaks can reveal the nubbed handle or close the panel by posting the Darwin notification com.mlgm.pulloverx.external-wake.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>isStaticText</key>
 			<true/>
