@@ -82,7 +82,6 @@
     BOOL hapticsEnabled;
     POAppRailTile *sideSwitchButton;
     BOOL sideSwitchEnabled;
-    BOOL centeredIcons;
     CGFloat lastCenteredLayoutHeight;
 }
 
@@ -173,7 +172,6 @@
     tileSide = MAX(1, tileSize);
     activeBundleId = [newActiveBundleId copy];
     hapticsEnabled = [[POApplicationHelper settings][@"hapticFeedback"] boolValue];
-    centeredIcons = [[POApplicationHelper settings][@"railExpandCentered"] boolValue];
     [self reloadSideSwitchButton];
 
     for (POAppRailTile *tile in tiles) {
@@ -205,13 +203,24 @@
     [self setContentOffset:CGPointZero animated:NO];
 }
 
+// 居中排布由控制器按"小窗展开 && 设置开启"写入;翻转后强制下次布局重排,
+// 否则可视区高度没变时下面的高度守卫不会触发。
+- (void)setCenteredIcons:(BOOL)centeredIcons {
+    if (_centeredIcons == centeredIcons) {
+        return;
+    }
+    _centeredIcons = centeredIcons;
+    lastCenteredLayoutHeight = -1.0;
+    [self setNeedsLayout];
+}
+
 - (void)layoutTiles {
     NSUInteger count = tiles.count;
     CGFloat bottomInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
     CGFloat contentHeight;
     // 居中展开:第一个图标钉在竖栏顶部,其余图标从可视区垂直中点开始往下排。
     CGFloat middleOriginY = 0;
-    if (centeredIcons && count > 1) {
+    if (self.centeredIcons && count > 1) {
         middleOriginY = floor(CGRectGetHeight(self.bounds) / 2.0);
         CGFloat middleHeight = tileSide * (count - 1) + PO_APP_RAIL_TILE_GAP * (count - 2);
         contentHeight = MAX(tileSide, middleOriginY + middleHeight);
@@ -236,9 +245,9 @@
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    // 居中布局里"其余图标"的起点取决于可视区高度;reload 时 frame 还没定,
+    // reload 时 frame 还没定,居中排布里"其余图标"的起点取决于可视区高度,
     // 控制器定完 frame 后这里按最新高度重排一次,首秀和旋转都靠这一步纠正。
-    if (centeredIcons && CGRectGetHeight(self.bounds) != lastCenteredLayoutHeight) {
+    if (CGRectGetHeight(self.bounds) != lastCenteredLayoutHeight) {
         [self layoutTiles];
     }
     CGFloat bottomInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;

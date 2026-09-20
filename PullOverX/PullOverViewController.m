@@ -3207,6 +3207,13 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
 }
 
+// "把手展开居中"只在小窗展开时生效:缩点把手唤出的关闭态竖栏保持原排布,
+// 点选 APP、小窗展开后才切换为第一个图标钉顶、其余图标下移屏幕中部的布局。
+-(BOOL)railUsesCenteredIcons{
+    return panelState == POPanelStateOpen &&
+        [[POApplicationHelper settings][@"railExpandCentered"] boolValue];
+}
+
 -(void)layoutAppRail{
     if (!appRailView) {
         return;
@@ -3218,6 +3225,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         [bundleIds removeObject:pinnedBundleId];
         [bundleIds insertObject:pinnedBundleId atIndex:0];
     }
+    appRailView.centeredIcons = [self railUsesCenteredIcons];
     [appRailView reloadWithBundleIdentifiers:bundleIds.array
                               activeBundleId:pinnedBundleId
                                     tileSize:self.handle.frame.size.width];
@@ -3246,10 +3254,14 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     CGFloat margin = 10.0;
     CGFloat topLimit = self.view.safeAreaInsets.top + margin;
     CGFloat bottomLimit = CGRectGetHeight(self.view.bounds) - self.view.safeAreaInsets.bottom - margin;
+    // 同步居中开关(小窗展开 && 设置开启)再定高度:小窗从关闭态展开的瞬间
+    // 靠这里翻转 centeredIcons 并切换为全跨度 frame,竖栏顶部钳在 topLimit。
+    BOOL centeredIcons = [self railUsesCenteredIcons];
+    appRailView.centeredIcons = centeredIcons;
     CGFloat railHeight;
-    if ([[POApplicationHelper settings][@"railExpandCentered"] boolValue]) {
+    if (centeredIcons) {
         // 把手展开居中:竖栏占满上下可用空间,顶部图标与中部图标组都相对屏幕定位,
-        // 竖栏顶部因此被钳在 topLimit,与 POAppRailView 里按可视区中点排图标配套。
+        // 与 POAppRailView 里按可视区中点排图标配套。
         railHeight = MAX(0, bottomLimit - topLimit);
     } else {
         railHeight = MIN(appRailView.preferredContentSize.height, MAX(0, bottomLimit - topLimit));

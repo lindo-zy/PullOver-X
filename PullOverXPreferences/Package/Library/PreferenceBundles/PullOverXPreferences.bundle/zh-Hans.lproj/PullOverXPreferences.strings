@@ -27,7 +27,7 @@
 "Handle" = "把手";
 "Handle Side Switch" = "把手左右切换";
 "Center Rail on Expand" = "把手展开居中";
-"When enabled, the app rail spans from the top of the screen to the bottom: the first icon stays at the top and the remaining icons move down to the vertical middle. When you switch apps, the tapped app's icon returns to the top." = "开启后，竖栏上下撑满屏幕：第一个图标保持在顶部，其余图标下移到屏幕中部；切换应用后，所点应用的图标回到顶部。";
+"Applies while the panel is open: the first rail icon stays at the top of the screen and the remaining icons move down to the vertical middle, and switching apps brings the tapped app's icon back to the top. The rail revealed from the nubbed handle keeps the original layout until an app opens." = "开启后，小窗展开时第一个图标保持在屏幕顶部、其余图标下移到屏幕中部，切换应用后所点应用的图标回到顶部；缩点把手唤出的竖栏在打开应用前维持原排布。";
 "Handle Activation Guard" = "把手防误触";
 "Auto-Nub Handle when Inactive" = "不活动时自动收起把手";
 "Handle Size" = "把手大小";
