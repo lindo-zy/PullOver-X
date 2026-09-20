@@ -6,6 +6,7 @@
 
 #import "POAppRailView.h"
 #import "POApplicationHelper.h"
+#import "POLocalization.h"
 #import "headers.h"
 #import <objc/runtime.h>
 
@@ -79,6 +80,8 @@
     UILongPressGestureRecognizer *railLongPressGestureRecognizer;
     UIImpactFeedbackGenerator *impactGenerator;
     BOOL hapticsEnabled;
+    POAppRailTile *sideSwitchButton;
+    BOOL sideSwitchEnabled;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -119,11 +122,47 @@
 
 - (CGSize)preferredContentSize {
     NSUInteger count = tiles.count;
-    if (count == 0) {
-        return CGSizeMake(tileSide, tileSide);
+    CGFloat height = count > 0 ? tileSide * count + PO_APP_RAIL_TILE_GAP * (count - 1) : 0;
+    if (sideSwitchEnabled) {
+        height = height > 0 ? height + PO_APP_RAIL_TILE_GAP + tileSide : tileSide;
     }
-    CGFloat height = tileSide * count + PO_APP_RAIL_TILE_GAP * (count - 1);
+    if (height <= 0) {
+        height = tileSide;
+    }
     return CGSizeMake(tileSide, height);
+}
+
+// 底部"把手左右切换"按钮:开关关闭时整体移除,不显示也不响应。
+- (void)reloadSideSwitchButton {
+    sideSwitchEnabled = [[POApplicationHelper settings][@"railSideSwitch"] boolValue];
+    if (!sideSwitchEnabled) {
+        [sideSwitchButton removeFromSuperview];
+        sideSwitchButton = nil;
+        return;
+    }
+    if (sideSwitchButton && CGRectGetWidth(sideSwitchButton.frame) != tileSide) {
+        // 把手大小变化后按新尺寸重建,瓦片的圆角/图标内边距都在构造时按尺寸确定。
+        [sideSwitchButton removeFromSuperview];
+        sideSwitchButton = nil;
+    }
+    if (sideSwitchButton) {
+        return;
+    }
+    sideSwitchButton = [[POAppRailTile alloc] initWithTileSize:tileSide];
+    CGFloat iconSize = MAX(0, tileSide - PO_APP_RAIL_ICON_INSET * 2.0);
+    UIImageSymbolConfiguration *configuration =
+        [UIImageSymbolConfiguration configurationWithPointSize:iconSize
+                                                        weight:UIImageSymbolWeightSemibold];
+    UIImage *symbol = [UIImage systemImageNamed:@"arrow.left.arrow.right"
+                              withConfiguration:configuration];
+    sideSwitchButton.iconView.image = [symbol imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    sideSwitchButton.iconView.tintColor = UIColor.labelColor;
+    sideSwitchButton.accessibilityLabel = POLocalizedString(@"Switch Handle Side", @"Tweak");
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                            action:@selector(sideSwitchTapped:)];
+    [sideSwitchButton addGestureRecognizer:tap];
+    [self addSubview:sideSwitchButton];
+    [self setNeedsLayout];
 }
 
 - (void)reloadWithBundleIdentifiers:(NSArray<NSString *> *)bundleIdentifiers
@@ -132,6 +171,7 @@
     tileSide = MAX(1, tileSize);
     activeBundleId = [newActiveBundleId copy];
     hapticsEnabled = [[POApplicationHelper settings][@"hapticFeedback"] boolValue];
+    [self reloadSideSwitchButton];
 
     for (POAppRailTile *tile in tiles) {
         [tile removeFromSuperview];
@@ -166,7 +206,10 @@
     NSUInteger count = tiles.count;
     CGFloat contentHeight = tileSide * count + PO_APP_RAIL_TILE_GAP * MAX(0, (NSInteger)count - 1);
     self.contentSize = CGSizeMake(tileSide, contentHeight);
-    self.scrollEnabled = contentHeight > CGRectGetHeight(self.bounds) + 0.5;
+    // 换边按钮固定在竖栏底部不随内容滚动,底部内边距让最后的图标可以滚到按钮上方。
+    CGFloat bottomInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
+    self.contentInset = UIEdgeInsetsMake(0, 0, bottomInset, 0);
+    self.scrollEnabled = contentHeight + bottomInset > CGRectGetHeight(self.bounds) + 0.5;
     for (NSUInteger index = 0; index < count; index++) {
         POAppRailTile *tile = tiles[index];
         tile.frame = CGRectMake(0, tileSide * index + PO_APP_RAIL_TILE_GAP * index, tileSide, tileSide);
@@ -176,7 +219,12 @@
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    self.scrollEnabled = self.contentSize.height > CGRectGetHeight(self.bounds) + 0.5;
+    CGFloat bottomInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
+    self.scrollEnabled = self.contentSize.height + bottomInset > CGRectGetHeight(self.bounds) + 0.5;
+    if (sideSwitchButton) {
+        // bounds.origin 随滚动变化,按其最大 Y 取框让按钮始终钉在可视区底部。
+        sideSwitchButton.frame = CGRectMake(0, CGRectGetMaxY(self.bounds) - tileSide, tileSide, tileSide);
+    }
 }
 
 - (CGAffineTransform)iconLayoutTransform {
@@ -210,6 +258,13 @@
         [impactGenerator impactOccurred];
     }
     [self.railDelegate appRailView:self didTapBundleId:tile.bundleId];
+}
+
+- (void)sideSwitchTapped:(UITapGestureRecognizer *)recognizer {
+    if (hapticsEnabled) {
+        [impactGenerator impactOccurred];
+    }
+    [self.railDelegate appRailViewDidTapSideSwitch:self];
 }
 
 - (void)railPan:(UIPanGestureRecognizer *)recognizer {

@@ -23,6 +23,7 @@
 "Keyboard Avoiding" = "键盘避让";
 "Enlarge Keyboard in Landscape" = "横屏放大键盘";
 "Handle" = "把手";
+"Handle Side Switch" = "把手左右切换";
 "Handle Activation Guard" = "把手防误触";
 "Auto-Nub Handle when Inactive" = "不活动时自动收起把手";
 "Handle Size" = "把手大小";

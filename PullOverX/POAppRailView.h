@@ -4,7 +4,8 @@
 //
 //  小窗打开时常驻显示的应用竖栏:把当前记录的全部 APP 以图标形式列在
 //  把手所在的一列,点击图标即可切换小窗内容。平移手势转发给控制器用于
-//  拖拽关闭小窗,长按手势转发用于调出原快速切换菜单。
+//  拖拽关闭小窗,长按手势转发用于调出原快速切换菜单。竖栏最底部固定一个
+//  把手左右切换按钮(受"把手左右切换"开关控制),点击后把手换边、竖直位置不变。
 //
 
 #import <UIKit/UIKit.h>
@@ -13,6 +14,8 @@
 - (void)appRailView:(UIView *)railView didTapBundleId:(NSString *)bundleId;
 - (void)appRailView:(UIView *)railView didReceivePan:(UIPanGestureRecognizer *)recognizer;
 - (void)appRailView:(UIView *)railView didReceiveLongPress:(UILongPressGestureRecognizer *)recognizer;
+// 点击竖栏底部的把手左右切换按钮。
+- (void)appRailViewDidTapSideSwitch:(UIView *)railView;
 @end
 
 @interface POAppRailView : UIScrollView

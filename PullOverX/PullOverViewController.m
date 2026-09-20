@@ -3267,6 +3267,18 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [self handle:self.handle didLongPress:recognizer];
 }
 
+-(void)appRailViewDidTapSideSwitch:(UIView *)railView{
+    // 长按/拖拽进行中不换边:换边会异步触发 layoutAppRail 重建图标,
+    // 不能与驱动菜单或拖拽关闭的手势叠加;菜单会话期间遮罩本已拦住按钮,双保险。
+    if (presentedQuickSwitchMenu || [self isPanelTransitioning] || scrollView.dragging ||
+        scrollView.decelerating || [appRailView isInteracting]) {
+        return;
+    }
+    [self cancelAutoNubTimer];
+    // 复用镜像换边:翻转 leftHanded 并广播设置变更,窗口镜像动画后把手水平换边、竖直位置不变。
+    [self commitMirrorSideSwitch];
+}
+
 #pragma mark - MHHandleDelegate
 
 -(void)handle:(POHandle *)handle didReceiveTap:(UIGestureRecognizer *)recognizer{
