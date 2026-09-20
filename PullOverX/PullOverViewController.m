@@ -3295,11 +3295,13 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 -(void)appRailView:(UIView *)railView didReceiveLongPress:(UILongPressGestureRecognizer *)recognizer{
     // 小窗打开时长按菜单由这路长按手势全程驱动,菜单弹出后 Changed/Ended/Cancelled
     // 仍必须转发,否则菜单收不起来并挡住全部交互(表现为卡死);只需拦住重复的 Began,
-    // 该情形由 handle:didLongPress: 里的 canBeginQuickSwitchSession 兜底。
+    // 该情形由 canBeginQuickSwitchSession 兜底。
     if (recognizer.state == UIGestureRecognizerStateBegan && presentedQuickSwitchMenu) {
         return;
     }
-    [self handle:self.handle didLongPress:recognizer];
+    // 菜单锚点取被长按的图标瓦片:竖栏图标分居上下后,菜单要落在长按位置而不是把手处。
+    [self presentQuickSwitchMenuFromAnchorView:
+        [appRailView longPressAnchorViewForRecognizer:recognizer] recognizer:recognizer];
 }
 
 -(void)appRailViewDidTapSideSwitch:(UIView *)railView{
@@ -3480,6 +3482,13 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 }
 
 -(void)handle:(POHandle *)handle didLongPress:(UILongPressGestureRecognizer *)recognizer{
+    [self presentQuickSwitchMenuFromAnchorView:handle recognizer:recognizer];
+}
+
+// anchorView 决定快速切换菜单的呈现位置:把手长按传把手本身;竖栏长按传被按的
+// 图标瓦片,菜单因此垂直落在长按位置,而不是隐藏把手所在的上方位置。
+-(void)presentQuickSwitchMenuFromAnchorView:(UIView *)anchorView
+                                 recognizer:(UILongPressGestureRecognizer *)recognizer{
     if (recognizer.state == UIGestureRecognizerStateBegan) {
         if (![self canBeginQuickSwitchSession]) {
             return;
@@ -3497,14 +3506,14 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 
         UIView<POQuickSwitchMenuPresenting> *candidateMenu =
             [self quickSwitchMenuForLayoutMode:selectedMode];
-        BOOL menuHandledGesture = [candidateMenu presentFromHandle:handle withRecognizer:recognizer];
+        BOOL menuHandledGesture = [candidateMenu presentFromHandle:anchorView withRecognizer:recognizer];
         if (!menuHandledGesture && selectedMode == POQuickSwitchLayoutModeHorizontalBottom) {
             selectedMode = POQuickSwitchLayoutModeVerticalSide;
             if (self.handle.isNubbed) {
                 self.handle.isNubbed = NO;
             }
             candidateMenu = [self quickSwitchMenuForLayoutMode:selectedMode];
-            menuHandledGesture = [candidateMenu presentFromHandle:handle withRecognizer:recognizer];
+            menuHandledGesture = [candidateMenu presentFromHandle:anchorView withRecognizer:recognizer];
         }
         if (!menuHandledGesture) {
             [self restoreQuickSwitchContentYieldIfNeededAnimated:NO];
@@ -3520,7 +3529,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         return;
     }
 
-    [presentingMenu presentFromHandle:handle withRecognizer:recognizer];
+    [presentingMenu presentFromHandle:anchorView withRecognizer:recognizer];
 }
 
 

@@ -280,6 +280,20 @@
         longPressState == UIGestureRecognizerStateChanged;
 }
 
+- (UIView *)longPressAnchorViewForRecognizer:(UILongPressGestureRecognizer *)recognizer {
+    CGPoint point = [recognizer locationInView:self];
+    POAppRailTile *nearest = nil;
+    CGFloat nearestDistance = CGFLOAT_MAX;
+    for (POAppRailTile *tile in tiles) {
+        CGFloat distance = fabs(CGRectGetMidY(tile.frame) - point.y);
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearest = tile;
+        }
+    }
+    return nearest ?: (UIView *)self;
+}
+
 - (void)tileTapped:(UITapGestureRecognizer *)recognizer {
     POAppRailTile *tile = (POAppRailTile *)recognizer.view;
     if (![tile isKindOfClass:[POAppRailTile class]] || tile.bundleId.length == 0) {

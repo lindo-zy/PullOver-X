@@ -43,4 +43,8 @@
 // 栏内拖拽/长按手势是否正在进行。进行中时视图不能被 hidden,否则触摸会被取消。
 - (BOOL)isInteracting;
 
+// 快速切换菜单的呈现锚点:长按落点竖直方向就近命中的图标瓦片,让菜单落在
+// 长按位置而不是把手位置;没有可命中的图标时返回竖栏自身。
+- (UIView *)longPressAnchorViewForRecognizer:(UILongPressGestureRecognizer *)recognizer;
+
 @end
