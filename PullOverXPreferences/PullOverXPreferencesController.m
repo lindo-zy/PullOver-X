@@ -162,7 +162,10 @@ static NSString * const kPOEnabledPendingRespringKey = @"enabled-respring-pendin
 - (id)controlValue {
     NSInteger index = self.control.selectedSegmentIndex;
     if (index < 0 || index >= (NSInteger)self.segmentValues.count) {
-        return nil;
+        // 分段控件重建的瞬间可能没有选中项:回落到声明的默认值而不是 nil,
+        // 避免把 nil 传给 setValue:forSpecifier: 误删已保存的配置键。
+        id fallback = [self.specifier propertyForKey:@"default"];
+        return (fallback && [self.segmentValues containsObject:fallback]) ? fallback : nil;
     }
     return self.segmentValues[index];
 }

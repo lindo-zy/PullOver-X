@@ -220,11 +220,18 @@
     CGFloat contentHeight;
     // 居中展开:第一个图标钉在竖栏顶部,其余图标从可视区垂直中点开始往下排。
     CGFloat middleOriginY = 0;
-    if (self.centeredIcons && count > 1) {
-        middleOriginY = floor(CGRectGetHeight(self.bounds) / 2.0);
-        CGFloat middleHeight = tileSide * (count - 1) + PO_APP_RAIL_TILE_GAP * (count - 2);
+    CGFloat middleHeight = count > 1 ? tileSide * (count - 1) + PO_APP_RAIL_TILE_GAP * (count - 2) : 0;
+    CGFloat availableHeight = CGRectGetHeight(self.bounds);
+    // 应用过多时中部图标组放不下可视区,会压到换边按钮上或被底边截断,
+    // 此时整体退回紧凑排布,靠滚动展示全部图标,不再做首尾分离布局。
+    BOOL centered = self.centeredIcons && count > 1 &&
+        floor(availableHeight / 2.0) >= tileSide + PO_APP_RAIL_TILE_GAP &&
+        floor(availableHeight / 2.0) + middleHeight <= availableHeight - bottomInset + 0.5;
+    if (centered) {
+        middleOriginY = floor(availableHeight / 2.0);
         contentHeight = MAX(tileSide, middleOriginY + middleHeight);
     } else {
+        middleOriginY = 0;
         contentHeight = tileSide * count + PO_APP_RAIL_TILE_GAP * MAX(0, (NSInteger)count - 1);
     }
     self.contentSize = CGSizeMake(tileSide, contentHeight);

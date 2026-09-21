@@ -193,12 +193,14 @@ static id POSharedObjectForClass(Class cls) {
     NSDictionary *settings = [self settings];
     NSArray *sourceBundleIds = nil;
     NSInteger requestedRecentCount = 0;
-    if ([settings[@"style"] isEqualToString:@"Recent Apps"]) {
+    if ([settings[@"style"] isEqualToString:@"Favorite Apps"]) {
+        sourceBundleIds = [settings[@"favorites"] isKindOfClass:[NSArray class]] ? settings[@"favorites"] : @[];
+    } else {
+        // 只有显式选择"收藏应用"才读收藏列表;默认值/键缺失/旧版遗留的异常取值
+        // 一律按最近应用处理,避免注销重建进程后默认配置落到收藏分支。
         requestedRecentCount = [settings[@"recentAppsCount"] integerValue];
         NSInteger fetchCount = requestedRecentCount > 0 ? requestedRecentCount + 1 : 0;
         sourceBundleIds = fetchCount > 0 ? [self recentAppsWithCount:(int)fetchCount] : @[];
-    } else {
-        sourceBundleIds = [settings[@"favorites"] isKindOfClass:[NSArray class]] ? settings[@"favorites"] : @[];
     }
 
     NSString *frontMostBundleId = [self frontMostBundleId];
