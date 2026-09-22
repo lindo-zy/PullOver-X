@@ -143,11 +143,6 @@
     return sideSwitchEnabled && !self.horizontalLayout;
 }
 
-// 悬浮网格图标固定从左往右正常排布,不做左手镜像;贴边竖栏维持原镜像逻辑。
-- (CGAffineTransform)iconLayoutTransformForCurrentLayout {
-    return self.horizontalLayout ? CGAffineTransformIdentity : [self iconLayoutTransform];
-}
-
 - (CGSize)preferredContentSize {
     NSUInteger count = tiles.count;
     CGFloat height = count > 0 ? tileSide * count + PO_APP_RAIL_TILE_GAP * (count - 1) : 0;
@@ -244,7 +239,7 @@
         POAppRailTile *tile = [[POAppRailTile alloc] initWithTileSize:tileSide];
         tile.bundleId = bundleId;
         tile.iconView.image = [POApplicationHelper imageForBundleId:bundleId];
-        tile.iconView.transform = [self iconLayoutTransformForCurrentLayout];
+        tile.iconView.transform = [self iconLayoutTransform];
 
         SBApplication *application = [[objc_getClass("SBApplicationController") sharedInstance]
             applicationWithBundleIdentifier:bundleId];
@@ -285,7 +280,7 @@
 - (void)layoutTiles {
     NSUInteger count = tiles.count;
     CGFloat sideInset = [self sideSwitchVisible] ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
-    CGAffineTransform iconTransform = [self iconLayoutTransformForCurrentLayout];
+    CGAffineTransform iconTransform = [self iconLayoutTransform];
     if (self.horizontalLayout) {
         // 悬浮网格:按可视区宽度从左往右折行成多排,超高时竖向滚动;不显示
         // 换边按钮,底部无占位内边距,最后一排可以贴着毛玻璃底衬滚到底。
@@ -295,11 +290,20 @@
         self.contentSize = CGSizeMake(CGRectGetWidth(self.bounds), contentHeight);
         self.contentInset = UIEdgeInsetsZero;
         self.scrollEnabled = contentHeight + sideInset > CGRectGetHeight(self.bounds) + 0.5;
+        // 整窗在左手模式下水平镜像(PullOverX.mm 的 POApplyOrdinarySettings),
+        // 瓦片按网格宽度反向落位,屏幕上才保持从左往右的阅读顺序,
+        // 不满一排的末行也会靠屏幕左侧起排。
+        BOOL mirrorTiles = [[POApplicationHelper settings][@"leftHanded"] boolValue];
+        CGFloat gridWidth = CGRectGetWidth(self.bounds);
         for (NSUInteger index = 0; index < count; index++) {
             POAppRailTile *tile = tiles[index];
             CGFloat column = floor(index % (NSUInteger)columns);
             CGFloat row = floor(index / (NSUInteger)columns);
-            tile.frame = CGRectMake(column * (tileSide + PO_APP_RAIL_TILE_GAP),
+            CGFloat tileX = column * (tileSide + PO_APP_RAIL_TILE_GAP);
+            if (mirrorTiles) {
+                tileX = gridWidth - tileX - tileSide;
+            }
+            tile.frame = CGRectMake(tileX,
                                     row * (tileSide + PO_APP_RAIL_TILE_GAP),
                                     tileSide, tileSide);
             tile.iconView.transform = iconTransform;
@@ -368,6 +372,7 @@
     }
 }
 
+// 整窗在左手模式下水平镜像,栏内图标统一反向镜像抵消,屏幕上才显示正向原图。
 - (CGAffineTransform)iconLayoutTransform {
     return [[POApplicationHelper settings][@"leftHanded"] boolValue]
         ? CGAffineTransformMakeScale(-1.0, 1.0)
@@ -375,7 +380,7 @@
 }
 
 - (void)refreshLayoutDirection {
-    CGAffineTransform iconTransform = [self iconLayoutTransformForCurrentLayout];
+    CGAffineTransform iconTransform = [self iconLayoutTransform];
     for (POAppRailTile *tile in tiles) {
         tile.iconView.transform = iconTransform;
     }
