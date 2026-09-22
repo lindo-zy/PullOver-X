@@ -21,6 +21,10 @@ notify_post("com.mlgm.pulloverx.external-wake");
 
 The feature can be toggled in settings ("External Wake"), and repeated notifications within one second are debounced.
 
+## Nub Rail Float
+
+Tapping the nubbed (shrunk) handle reveals the app rail floating at the center of the screen. While the keyboard is visible, the rail automatically moves above the keyboard and falls back to the center when it hides. Toggle it in settings ("Float Nub Rail Centered"); turning it off keeps the rail in the handle's edge column.
+
 ## License
 
 PullOver X is distributed under the [GNU General Public License v3.0](LICENSE).

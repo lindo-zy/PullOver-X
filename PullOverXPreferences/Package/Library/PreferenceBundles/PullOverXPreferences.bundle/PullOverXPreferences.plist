@@ -445,7 +445,33 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>Applies while the panel is open: the first rail icon stays at the top of the screen and the remaining icons move down to the vertical middle, and switching apps brings the tapped app's icon back to the top. The rail revealed from the nubbed handle keeps the original layout until an app opens.</string>
+			<string>Applies while the panel is open: the first rail icon stays at the top of the screen and the remaining icons move down to the vertical middle, and switching apps brings the tapped app's icon back to the top.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>key</key>
+			<string>nubRailFloatCentered</string>
+			<key>label</key>
+			<string>Float Nub Rail Centered</string>
+			<key>defaults</key>
+			<string>com.mlgm.pulloverx</string>
+			<key>set</key>
+			<string>setValue:forSpecifier:</string>
+			<key>get</key>
+			<string>getValueForSpecifier:</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>isStaticText</key>
+			<true/>
+			<key>label</key>
+			<string></string>
+			<key>footerText</key>
+			<string>When enabled, the rail revealed by tapping the nubbed handle floats at the center of the screen, and moves above the keyboard while the keyboard is visible. Turn it off to keep that rail in the handle's edge column.</string>
 		</dict>
 		<dict>
 			<key>cell</key>

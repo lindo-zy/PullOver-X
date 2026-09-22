@@ -320,6 +320,7 @@ static id POSharedObjectForClass(Class cls) {
             @"leftHanded": @NO,
             @"railSideSwitch": @YES,
             @"railExpandCentered": @YES,
+            @"nubRailFloatCentered": @YES,
             @"hideOnScreenshot": @YES,
             @"hideLabels": @NO,
             @"handleSize": @34,

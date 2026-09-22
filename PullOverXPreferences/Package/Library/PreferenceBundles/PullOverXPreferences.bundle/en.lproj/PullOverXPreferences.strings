@@ -27,7 +27,9 @@
 "Handle" = "Handle";
 "Handle Side Switch" = "Handle Side Switch";
 "Center Rail on Expand" = "Center Rail on Expand";
-"Applies while the panel is open: the first rail icon stays at the top of the screen and the remaining icons move down to the vertical middle, and switching apps brings the tapped app's icon back to the top. The rail revealed from the nubbed handle keeps the original layout until an app opens." = "Applies while the panel is open: the first rail icon stays at the top of the screen and the remaining icons move down to the vertical middle, and switching apps brings the tapped app's icon back to the top. The rail revealed from the nubbed handle keeps the original layout until an app opens.";
+"Applies while the panel is open: the first rail icon stays at the top of the screen and the remaining icons move down to the vertical middle, and switching apps brings the tapped app's icon back to the top." = "Applies while the panel is open: the first rail icon stays at the top of the screen and the remaining icons move down to the vertical middle, and switching apps brings the tapped app's icon back to the top.";
+"Float Nub Rail Centered" = "Float Nub Rail Centered";
+"When enabled, the rail revealed by tapping the nubbed handle floats at the center of the screen, and moves above the keyboard while the keyboard is visible. Turn it off to keep that rail in the handle's edge column." = "When enabled, the rail revealed by tapping the nubbed handle floats at the center of the screen, and moves above the keyboard while the keyboard is visible. Turn it off to keep that rail in the handle's edge column.";
 "Handle Activation Guard" = "Handle Activation Guard";
 "Auto-Nub Handle when Inactive" = "Auto-Nub Handle when Inactive";
 "Handle Size" = "Handle Size";

@@ -192,6 +192,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     BOOL runtimeScenePublicationStaging;
     CGFloat portraitHostedLandscapeHandleAnchorY;
     POKeyboardNotificationState keyboardNotificationState;
+    CGRect floatingRailKeyboardFrame;
     BOOL hostedKeyboardLayerPresent;
     BOOL keyboardHideAnimationInFlight;
     NSUInteger keyboardStateHostGeneration;
@@ -2852,7 +2853,9 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
     keyboardNotificationState = POKeyboardNotificationStateVisible;
     keyboardHideAnimationInFlight = NO;
+    [self trackFloatingRailKeyboardFrameFromNotification:notification];
     [self avoidClosedHandleForKeyboardWillShow:notification];
+    [self updateFloatingAppRailForKeyboardAnimated:YES];
     [self reevaluateCardScaleAnimated:YES source:POCardScaleTransitionSourceKeyboard];
 }
 
@@ -2870,6 +2873,8 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         ? POKeyboardNotificationStateVisible
         : POKeyboardNotificationStateHidden;
     keyboardHideAnimationInFlight = keyboardNotificationState != POKeyboardNotificationStateVisible;
+    [self trackFloatingRailKeyboardFrameFromNotification:notification];
+    [self updateFloatingAppRailForKeyboardAnimated:YES];
     [self reevaluateCardScaleAnimated:YES source:POCardScaleTransitionSourceKeyboard];
 }
 
@@ -2882,12 +2887,15 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         [handleScrollView setContentOffset:CGPointMake(0, [self clampedHandleOffset:origOffset.floatValue]) animated:YES];
         origOffset = nil;
     }
+    // 键盘收起:悬浮竖栏沿键盘动画落回屏幕中央。
+    [self updateFloatingAppRailForKeyboardAnimated:YES];
 }
 
 -(void)keyboardDidShow:(NSNotification *)notification{
     [self updateKeyboardAnimationFromNotification:notification];
     keyboardNotificationState = POKeyboardNotificationStateVisible;
     keyboardHideAnimationInFlight = NO;
+    [self trackFloatingRailKeyboardFrameFromNotification:notification];
     [self reevaluateCardScaleAnimated:NO source:POCardScaleTransitionSourceKeyboard];
 }
 
@@ -2904,6 +2912,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     keyboardNotificationState = frameVisible
         ? POKeyboardNotificationStateVisible
         : POKeyboardNotificationStateHidden;
+    [self trackFloatingRailKeyboardFrameFromNotification:notification];
     [self reevaluateCardScaleAnimated:NO source:POCardScaleTransitionSourceKeyboard];
 }
 
@@ -3214,6 +3223,15 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         [[POApplicationHelper settings][@"railExpandCentered"] boolValue];
 }
 
+// 缩点把手唤出的关闭态竖栏是否悬浮屏幕中央:与 railUsesCenteredIcons 互斥
+// (后者仅小窗展开态),横屏快速切换布局维持把手边缘列的原排布。
+-(BOOL)railFloatsCenteredInClosedState{
+    return panelState == POPanelStateClosed && nubRevealRailActive &&
+        self.handle.layoutMode == POHandleLayoutModeVerticalRail &&
+        ![self isHorizontalQuickSwitchLayoutMode] &&
+        [[POApplicationHelper settings][@"nubRailFloatCentered"] boolValue];
+}
+
 -(void)layoutAppRail{
     if (!appRailView) {
         return;
@@ -3258,6 +3276,12 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     // 靠这里翻转 centeredIcons 并切换为全跨度 frame,竖栏顶部钳在 topLimit。
     BOOL centeredIcons = [self railUsesCenteredIcons];
     appRailView.centeredIcons = centeredIcons;
+    if ([self railFloatsCenteredInClosedState]) {
+        [self positionAppRailFloatingCenteredWithTileSize:tileSize
+                                                 topLimit:topLimit
+                                              bottomLimit:bottomLimit];
+        return;
+    }
     CGFloat railHeight;
     if (centeredIcons) {
         // 把手展开居中:竖栏占满上下可用空间,顶部图标与中部图标组都相对屏幕定位,
@@ -3270,6 +3294,64 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     CGFloat railY = CGRectGetMidY(handleFrame) - railHeight / 2.0;
     railY = MIN(MAX(railY, topLimit), MAX(topLimit, bottomLimit - railHeight));
     appRailView.frame = CGRectMake(CGRectGetMinX(handleFrame), railY, tileSize, railHeight);
+}
+
+// 缩点唤出的悬浮竖栏:整列水平居中,垂直在可用空间内居中。键盘可见且自然落位
+// 会压到键盘时,把可用底界抬到键盘上缘上方再重新居中;空间放不下时压缩竖栏
+// 高度,多出的图标靠竖栏内部滚动。键盘收起后由 updateFloatingAppRailForKeyboard
+// 带着键盘动画落回屏幕中央。
+-(void)positionAppRailFloatingCenteredWithTileSize:(CGFloat)tileSize
+                                          topLimit:(CGFloat)topLimit
+                                       bottomLimit:(CGFloat)bottomLimit{
+    CGFloat railHeight = MIN(appRailView.preferredContentSize.height, MAX(0, bottomLimit - topLimit));
+    railHeight = MAX(railHeight, tileSize);
+    CGFloat railY = topLimit + MAX(0, (bottomLimit - topLimit - railHeight) / 2.0);
+    if (keyboardNotificationState == POKeyboardNotificationStateVisible &&
+        !CGRectIsEmpty(floatingRailKeyboardFrame)) {
+        CGFloat keyboardGap = 10.0;
+        CGFloat keyboardTopLimit = CGRectGetMinY(floatingRailKeyboardFrame) - keyboardGap;
+        if (keyboardTopLimit >= topLimit && railY + railHeight > keyboardTopLimit) {
+            CGFloat availableHeight = MAX(0, keyboardTopLimit - topLimit);
+            railHeight = MIN(appRailView.preferredContentSize.height, MAX(availableHeight, tileSize));
+            railHeight = MAX(railHeight, tileSize);
+            railY = topLimit + MAX(0, (availableHeight - railHeight) / 2.0);
+        }
+    }
+    CGFloat railX = (CGRectGetWidth(self.view.bounds) - tileSize) / 2.0;
+    appRailView.frame = CGRectMake(railX, railY, tileSize, railHeight);
+}
+
+// 键盘通知里的目标 frame 换算到控制器视图坐标,供悬浮竖栏避让使用;
+// 不管竖栏当前是否可见都持续记录,缩点唤出瞬间才能直接落对位置。
+-(void)trackFloatingRailKeyboardFrameFromNotification:(NSNotification *)notification{
+    NSValue *frameValue = notification.userInfo[UIKeyboardFrameEndUserInfoKey];
+    if (![frameValue isKindOfClass:[NSValue class]]) {
+        return;
+    }
+    CGRect keyboardFrame = frameValue.CGRectValue;
+    if (CGRectIsEmpty(keyboardFrame)) {
+        return;
+    }
+    floatingRailKeyboardFrame = [self.view convertRect:keyboardFrame fromView:nil];
+}
+
+// 悬浮竖栏跟随键盘动画重排:仅悬浮态且竖栏可见时生效;动画时长/曲线用键盘
+// 通知解析出的值,与宿主键盘的出入场保持同步。
+-(void)updateFloatingAppRailForKeyboardAnimated:(BOOL)animated{
+    if (!appRailView || appRailView.hidden || ![self railFloatsCenteredInClosedState]) {
+        return;
+    }
+    if (animated && lastKeyboardAnimationDuration > 0) {
+        [UIView animateWithDuration:lastKeyboardAnimationDuration
+                              delay:0
+                            options:lastKeyboardAnimationOptions
+                         animations:^{
+            [self positionAppRail];
+        }
+                         completion:nil];
+    } else {
+        [self positionAppRail];
+    }
 }
 
 -(void)appRailView:(UIView *)railView didTapBundleId:(NSString *)bundleId{
