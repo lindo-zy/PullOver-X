@@ -157,6 +157,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     CGFloat contentLayoutWidth;
     UIInterfaceOrientation hostedLayoutOrientation;
     BOOL pendingOpenState;
+    BOOL splitLayoutActive;
     CGFloat panelPanStartOffsetX;
     POHandlePanIntent handlePanIntent;
     BOOL handlePanStartedNubbed;
@@ -530,6 +531,10 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 }
 
 -(POInteractionMode)baseInteractionModeForHostedOrientation:(UIInterfaceOrientation)hostedOrientation{
+    if (splitLayoutActive && panelState != POPanelStateClosed) {
+        // 上下分屏:卡片外区域透传给底层 App,不铺遮罩。
+        return POInteractionModeSplitPassthrough;
+    }
     if (!POIsConcretePresentationOrientation(hostedOrientation)) {
         return POInteractionModeSplitPassthrough;
     }
@@ -678,6 +683,10 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 }
 
 -(BOOL)shouldUsePortraitHostedLandscapeOptimizationForOrientation:(UIInterfaceOrientation)orientation{
+    if (splitLayoutActive) {
+        // 分屏形态卡片钉在下半区,不做竖向移动与底部横条快速切换。
+        return NO;
+    }
     CGRect bounds = self.view.bounds;
     BOOL shellIsPortrait = CGRectGetHeight(bounds) > CGRectGetWidth(bounds);
     return shellIsPortrait && UIInterfaceOrientationIsLandscape(orientation);
@@ -1437,15 +1446,44 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [hostSession activateBundleId:pinnedBundleId];
 }
 
--(void)beginSplitSessionIfNeeded{
+// 上下分屏:把手点击时前台存在其他 App,底层 App 保活在上半区、托管 App 占下半区。
+// 关闭态用前台 App 预测下一次打开的形态,让托管层的画布/初始 frame 提前按半屏准备。
+-(BOOL)isSplitLayoutActiveOrPending{
+    if (splitLayoutActive) {
+        return YES;
+    }
+    if (panelState != POPanelStateClosed && panelState != POPanelStateClosing) {
+        return NO;
+    }
+    NSString *frontMostBundleId = [POApplicationHelper frontMostBundleId];
+    if (frontMostBundleId.length == 0) {
+        return NO;
+    }
+    NSString *targetBundleId = pinnedBundleId.length > 0 ? pinnedBundleId : hostSession.requestedBundleId;
+    return targetBundleId.length == 0 || ![frontMostBundleId isEqualToString:targetBundleId];
+}
+
+// 分屏卡片高度:全宽贴边,占据可用区域(去上下安全区)的下半份。
+-(CGFloat)splitLayoutBottomCardHeightForShellBounds:(CGRect)bounds{
+    UIEdgeInsets viewInsets = self.view.safeAreaInsets;
+    UIEdgeInsets windowInsets = self.view.window.safeAreaInsets;
+    CGFloat topInset = MAX(viewInsets.top, windowInsets.top) + CONTENT_EDGE_GAP;
+    CGFloat bottomInset = MAX(viewInsets.bottom, windowInsets.bottom) + CONTENT_EDGE_GAP;
+    CGFloat usableHeight = CGRectGetHeight(bounds) - topInset - bottomInset;
+    return MAX(1.0, floorf(usableHeight * 0.5));
+}
+
+-(BOOL)beginSplitSessionIfNeeded{
     POSplitSessionController *splitSession = [POSplitSessionController sharedInstance];
     if (splitSession.isActive) {
-        return;
+        return splitSession.baseBundleIdentifier.length > 0 &&
+            ![splitSession.baseBundleIdentifier isEqualToString:@"com.apple.springboard"];
     }
-    NSString *baseBundleId = [POApplicationHelper frontMostBundleId];
-    if (baseBundleId.length > 0 && [baseBundleId isEqualToString:pinnedBundleId]) {
-        return;
+    NSString *frontMostBundleId = [POApplicationHelper frontMostBundleId];
+    if (frontMostBundleId.length > 0 && [frontMostBundleId isEqualToString:pinnedBundleId]) {
+        return NO;
     }
+    NSString *baseBundleId = frontMostBundleId;
     id baseScene = nil;
     if (baseBundleId.length > 0) {
         baseScene = [[ContextHostManager sharedInstance] probeSceneForBundleId:baseBundleId];
@@ -1467,6 +1505,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         }
     }
     [splitSession beginWithBaseBundleIdentifier:baseBundleId scene:baseScene];
+    return frontMostBundleId.length > 0;
 }
 
 -(BOOL)isLandscapePanelFullyOpenAndIdle{
@@ -1481,6 +1520,10 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 }
 
 -(POCardScaleContext)currentCardScaleContext{
+    if (splitLayoutActive) {
+        // 分屏卡片已占满半屏,键盘时不再放大。
+        return POCardScaleContextNone;
+    }
     UIInterfaceOrientation hostedOrientation = [self resolvedHostedLayoutOrientation];
     if (!POIsConcretePresentationOrientation(hostedOrientation)) {
         return POCardScaleContextNone;
@@ -2197,6 +2240,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         [scrollView setContentOffset:CGPointZero animated:NO];
         [self hidePresentationContainer];
         shadowView.layer.shadowOpacity = 0;
+        splitLayoutActive = NO;
         BOOL deferSessionCleanup = deferScaledCloseSessionCleanup;
         deferScaledCloseSessionCleanup = NO;
         if (!deferSessionCleanup) {
@@ -2546,15 +2590,24 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     } else if (!portraitHostedLandscapeOptimization) {
         portraitHostedLandscapeHandleAnchorY = NAN;
     }
+    BOOL splitLayout = splitLayoutActive;
     CGSize logicalCanvas = [self contextManagerPreferredSceneStackSize:nil];
     CGFloat leadingInset = [self leadingSafeAreaInset] + CONTENT_EDGE_GAP;
     CGFloat trailingInset = [self trailingSafeAreaInset] + CONTENT_EDGE_GAP;
-    CGFloat availableCardWidth = portraitHostedLandscapeOptimization
-        ? CGRectGetWidth(bounds) - leadingInset - trailingInset
-        : CGRectGetWidth(bounds) - CONTENT_EDGE_GAP - self.handle.frame.size.width - HANDLE_EDGE_GAP - trailingInset;
-    CGFloat availableCardHeight = shellIsLandscape
-        ? CGRectGetHeight(bounds) - (CONTENT_EDGE_GAP * 2)
-        : portraitCanvasHeight * chromeScale;
+    CGFloat availableCardWidth;
+    CGFloat availableCardHeight;
+    if (splitLayout) {
+        // 上下分屏:卡片全宽贴边,占据可用区域下半份;同朝向托管画布与卡片 1:1。
+        availableCardWidth = CGRectGetWidth(bounds);
+        availableCardHeight = [self splitLayoutBottomCardHeightForShellBounds:bounds];
+    } else {
+        availableCardWidth = portraitHostedLandscapeOptimization
+            ? CGRectGetWidth(bounds) - leadingInset - trailingInset
+            : CGRectGetWidth(bounds) - CONTENT_EDGE_GAP - self.handle.frame.size.width - HANDLE_EDGE_GAP - trailingInset;
+        availableCardHeight = shellIsLandscape
+            ? CGRectGetHeight(bounds) - (CONTENT_EDGE_GAP * 2)
+            : portraitCanvasHeight * chromeScale;
+    }
     availableCardWidth = MAX(1, availableCardWidth);
     availableCardHeight = MAX(1, availableCardHeight);
 
@@ -2579,7 +2632,8 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [quickSwitchDragCoordinator layoutForBounds:bounds safeAreaInsets:self.view.safeAreaInsets];
 
     scrollView.frame = bounds;
-    scrollView.contentSize = CGSizeMake(CGRectGetWidth(bounds) + contentLayoutWidth + trailingInset,
+    scrollView.contentSize = CGSizeMake(CGRectGetWidth(bounds) + contentLayoutWidth +
+                                            (splitLayout ? 0 : trailingInset),
                                         CGRectGetHeight(bounds));
     CGFloat maximumContentOffsetX = [self maximumContentOffsetX];
     CGFloat restoredOffset = 0;
@@ -2594,9 +2648,18 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
 
     CGRect normalCardFrame = CGRectMake(CGRectGetWidth(bounds), 0, contentLayoutWidth, contentLayoutHeight);
-    normalCardFrame.origin.y = portraitHostedLandscapeOptimization
-        ? anchoredCardBottomY - CGRectGetHeight(normalCardFrame)
-        : CGRectGetMidY(bounds) - CGRectGetHeight(normalCardFrame) / 2.0;
+    if (splitLayout) {
+        // 分屏卡片贴屏幕下半区:滑入后卡片左缘正好落在屏幕 x=0。
+        normalCardFrame.origin.x = contentLayoutWidth;
+        UIEdgeInsets splitViewInsets = self.view.safeAreaInsets;
+        UIEdgeInsets splitWindowInsets = self.view.window.safeAreaInsets;
+        CGFloat splitBottomInset = MAX(splitViewInsets.bottom, splitWindowInsets.bottom) + CONTENT_EDGE_GAP;
+        normalCardFrame.origin.y = CGRectGetHeight(bounds) - splitBottomInset - CGRectGetHeight(normalCardFrame);
+    } else if (portraitHostedLandscapeOptimization) {
+        normalCardFrame.origin.y = anchoredCardBottomY - CGRectGetHeight(normalCardFrame);
+    } else {
+        normalCardFrame.origin.y = CGRectGetMidY(bounds) - CGRectGetHeight(normalCardFrame) / 2.0;
+    }
     normalCardFrame.origin.y = round(normalCardFrame.origin.y * screenScale) / screenScale;
 
     BOOL horizontalMode = portraitHostedLandscapeOptimization;
@@ -2670,6 +2733,10 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         shadowView.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:shadowView.bounds
                                                                   cornerRadius:CONTENT_CORNER_RADIUS].CGPath;
     }];
+    if (splitLayout) {
+        // 分屏卡片全宽,把手一列提到卡片之上保持可点。
+        [scrollView bringSubviewToFront:handleScrollView];
+    }
     CGFloat shadowProgress = MIN(MAX(scrollView.contentOffset.x / CONTENT_SHADOW_FADE_DISTANCE, 0), 1);
     shadowView.layer.shadowOpacity = CONTENT_SHADOW_OPACITY * shadowProgress;
     if (presentationSnapshotView) {
@@ -2724,6 +2791,9 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [self updateInteractionBackdropsAnimated:NO];
     [self updateAppRailVisibilityAnimated:NO];
     [scrollView bringSubviewToFront:keyboardZoomContainer];
+    if (splitLayoutActive) {
+        [scrollView bringSubviewToFront:handleScrollView];
+    }
 }
 
 -(void)prepareForOrientationChange{
@@ -2784,6 +2854,14 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     CGFloat shortSide = MIN(CGRectGetWidth(bounds), CGRectGetHeight(bounds));
     CGFloat longSide = MAX(CGRectGetWidth(bounds), CGRectGetHeight(bounds));
     UIInterfaceOrientation orientation = [self contextManagerPreferredHostedInterfaceOrientation:manager];
+    if ([self isSplitLayoutActiveOrPending]) {
+        BOOL hostedIsLandscape = UIInterfaceOrientationIsLandscape(orientation);
+        BOOL shellIsLandscape = CGRectGetWidth(bounds) > CGRectGetHeight(bounds);
+        // 同朝向类别才做真实半屏画布;跨朝向托管维持全屏画布缩放。
+        if (hostedIsLandscape == shellIsLandscape) {
+            return CGSizeMake(CGRectGetWidth(bounds), [self splitLayoutBottomCardHeightForShellBounds:bounds]);
+        }
+    }
     return UIInterfaceOrientationIsLandscape(orientation)
         ? CGSizeMake(longSide, shortSide)
         : CGSizeMake(shortSide, longSide);
@@ -3078,7 +3156,11 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
     [self cancelAutoNubTimer];
     [self removeKeyboardZoomSuspension:POKeyboardZoomSuspensionClosing];
-    [self beginSplitSessionIfNeeded];
+    BOOL splitLayout = [self beginSplitSessionIfNeeded];
+    if (splitLayout != splitLayoutActive) {
+        splitLayoutActive = splitLayout;
+        [self applyLayoutPreservingHandlePosition:YES];
+    }
 
     [self preparePanelForOpenPresentationIfNeeded];
 
@@ -3510,7 +3592,13 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
                 }
                 nubRevealRailActive = NO;
                 pendingOpenState = NO;
-                [self beginSplitSessionIfNeeded];
+                {
+                    BOOL splitLayout = [self beginSplitSessionIfNeeded];
+                    if (splitLayout != splitLayoutActive) {
+                        splitLayoutActive = splitLayout;
+                        [self applyLayoutPreservingHandlePosition:YES];
+                    }
+                }
                 break;
 
             case POHandlePanIntentClosePanel:
@@ -3948,6 +4036,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     deferredOpenGeneration += 1;
     [self cancelAutoNubTimer];
     [self dismissTransientInteractionUI];
+    splitLayoutActive = NO;
     scrollSnapAnimationInProgress = NO;
     [scrollView setContentOffset:CGPointMake([self maximumContentOffsetX], 0) animated:NO];
     panelState = POPanelStateOpen;
@@ -3982,6 +4071,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         [activeHostedBundleId isEqualToString:bundleId];
 
     deferredOpenGeneration += 1;
+    splitLayoutActive = NO;
     [[POSplitSessionController sharedInstance] end];
     [self cancelQuickSwitchPrewarm];
 
@@ -4455,6 +4545,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     interactiveHostIntentIssued = NO;
     interactiveHostResumeRequired = NO;
     quickSwitchOpeningApp = NO;
+    splitLayoutActive = NO;
     POQuickSwitchLayoutMode previousLayoutMode = [self currentQuickSwitchLayoutMode];
     CGFloat inheritedHandleScreenY = NAN;
     if (previousLayoutMode == POQuickSwitchLayoutModeHorizontalBottom) {
@@ -4887,6 +4978,7 @@ cannotHostFrontmostBundleId:(NSString *)bundleId
     if (![bundleId isEqualToString:pinnedBundleId]) {
         return;
     }
+    splitLayoutActive = NO;
     [[POSplitSessionController sharedInstance] end];
     [self cleanUpSubviews];
     presentationBundleId = nil;

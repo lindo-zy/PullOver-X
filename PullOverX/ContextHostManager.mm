@@ -742,6 +742,7 @@ static void PONormalizeIOS26PresentationContainerGeometry(UIView *container) {
 - (void)releaseProcessAssertion;
 - (int)pidForBundleId:(NSString *)bundleId;
 - (UIInterfaceOrientation)preferredHostedInterfaceOrientation;
+- (CGSize)hostedPresentationCanvasSizeForOrientation:(UIInterfaceOrientation)orientation;
 - (UIInterfaceOrientation)surfaceSourceOrientationForScene:(FBScene *)scene bundleId:(NSString *)bundleId;
 - (BOOL)isHostedGeometryReadyForScene:(FBScene *)scene bundleId:(NSString *)bundleId;
 - (BOOL)isHostedSceneContentReadyForPublication:(FBScene *)scene;
@@ -2247,7 +2248,7 @@ static BOOL POMainLayerIdentitiesEqual(NSArray<FBSceneLayer *> *lhs,
         }
 
         CGSize logicalSize = POIsConcreteInterfaceOrientation(sourceOrientation)
-            ? POHostedCanvasSizeForOrientation(sourceOrientation)
+            ? [self hostedPresentationCanvasSizeForOrientation:sourceOrientation]
             : CGSizeZero;
         id<ContextHostManagerExternalSceneDelegate> delegate = self.sceneDelegate;
         if ((logicalSize.width <= 0 || logicalSize.height <= 0) &&
@@ -2391,7 +2392,7 @@ static BOOL POMainLayerIdentitiesEqual(NSArray<FBSceneLayer *> *lhs,
 
     FBScene *scene = self.hostedScene;
     UIInterfaceOrientation targetOrientation = self.hostedInterfaceOrientation;
-    CGSize targetCanvas = POHostedCanvasSizeForOrientation(targetOrientation);
+    CGSize targetCanvas = [self hostedPresentationCanvasSizeForOrientation:targetOrientation];
     if (targetCanvas.width <= 0 || targetCanvas.height <= 0) {
         return NO;
     }
@@ -2481,6 +2482,28 @@ static BOOL POMainLayerIdentitiesEqual(NSArray<FBSceneLayer *> *lhs,
         : UIInterfaceOrientationPortrait;
 }
 
+// 托管画布解析:宿主(控制器)可给出非全屏画布(上下分屏的半屏)。仅当与请求朝向同
+// 类别且与默认全屏画布不同才采纳,跨朝向托管维持全屏画布缩放。
+- (CGSize)hostedPresentationCanvasSizeForOrientation:(UIInterfaceOrientation)orientation {
+    CGSize canvas = POHostedCanvasSizeForOrientation(orientation);
+    if (!POIsConcreteInterfaceOrientation(orientation)) {
+        return canvas;
+    }
+    CGSize preferredCanvas = CGSizeZero;
+    id<ContextHostManagerExternalSceneDelegate> delegate = self.sceneDelegate;
+    if ([delegate respondsToSelector:@selector(contextManagerPreferredSceneStackSize:)]) {
+        preferredCanvas = [delegate contextManagerPreferredSceneStackSize:self];
+    }
+    BOOL categoryMatches = preferredCanvas.width > 0 && preferredCanvas.height > 0 &&
+        (UIInterfaceOrientationIsLandscape(orientation)
+            ? preferredCanvas.width >= preferredCanvas.height
+            : preferredCanvas.height >= preferredCanvas.width);
+    if (categoryMatches && !POSceneSizesMatch(preferredCanvas, canvas)) {
+        return preferredCanvas;
+    }
+    return canvas;
+}
+
 - (BOOL)shouldRetainHostedServerFrameForScene:(FBScene *)scene {
     if (!scene || !self.isForegroundLeaseActive || scene != self.hostedScene ||
         self.hostedBundleId.length == 0 || !POIsConcreteInterfaceOrientation(self.hostedInterfaceOrientation)) {
@@ -2488,7 +2511,7 @@ static BOOL POMainLayerIdentitiesEqual(NSArray<FBSceneLayer *> *lhs,
     }
 
     UIInterfaceOrientation sourceOrientation = [self hostedPresentationSourceOrientation];
-    CGSize hostedCanvas = POHostedCanvasSizeForOrientation(sourceOrientation);
+    CGSize hostedCanvas = [self hostedPresentationCanvasSizeForOrientation:sourceOrientation];
 
     if (scene == self.ownedHostedScene) {
         if (NSProcessInfo.processInfo.operatingSystemVersion.majorVersion == 15) {
@@ -2539,7 +2562,7 @@ static BOOL POMainLayerIdentitiesEqual(NSArray<FBSceneLayer *> *lhs,
     }
 
     UIInterfaceOrientation sourceOrientation = [self hostedPresentationSourceOrientation];
-    CGSize hostedCanvas = POHostedCanvasSizeForOrientation(sourceOrientation);
+    CGSize hostedCanvas = [self hostedPresentationCanvasSizeForOrientation:sourceOrientation];
 
     CGRect hostedFrame = (CGRect){ CGPointZero, hostedCanvas };
     CGRect currentFrame = CGRectZero;
@@ -2654,15 +2677,24 @@ static BOOL POMainLayerIdentitiesEqual(NSArray<FBSceneLayer *> *lhs,
                                                   bundleId:(NSString *)bundleId {
     if (!scene || bundleId.length == 0 || scene != self.systemHostedSnapshotScene ||
         !self.systemHostedOriginalSettings || self.systemHostedInitialFrameApplied ||
-        scene == self.ownedHostedScene ||
-        (NSProcessInfo.processInfo.operatingSystemVersion.majorVersion != 15 &&
-         ![self requiresCrossOrientationHostingForBundleId:bundleId])) {
+        scene == self.ownedHostedScene) {
         return;
     }
 
     UIInterfaceOrientation hostedOrientation =
         [self surfaceSourceOrientationForScene:scene bundleId:bundleId];
     if (!POIsConcreteInterfaceOrientation(hostedOrientation)) {
+        return;
+    }
+    // 同朝向托管默认不改 scene frame(全屏画布缩放);上下分屏时宿主给出半屏画布,
+    // 需要改写初始 frame 让 App 按半屏真实布局。
+    BOOL splitCanvasHosting =
+        NSProcessInfo.processInfo.operatingSystemVersion.majorVersion != 15 &&
+        !POSceneSizesMatch([self hostedPresentationCanvasSizeForOrientation:hostedOrientation],
+                           POHostedCanvasSizeForOrientation(hostedOrientation));
+    if (NSProcessInfo.processInfo.operatingSystemVersion.majorVersion != 15 &&
+        ![self requiresCrossOrientationHostingForBundleId:bundleId] &&
+        !splitCanvasHosting) {
         return;
     }
     if (NSProcessInfo.processInfo.operatingSystemVersion.majorVersion == 15) {
@@ -2717,6 +2749,35 @@ static BOOL POMainLayerIdentitiesEqual(NSArray<FBSceneLayer *> *lhs,
 
     if (NSProcessInfo.processInfo.operatingSystemVersion.majorVersion == 15 &&
         [self shouldRetainHostedServerFrameForScene:scene]) {
+        return;
+    }
+
+    // 上下分屏(宿主给出非全屏画布)期间不还原原始 frame,改为持续维护半屏 frame,
+    // 旋转等几何变化后的发布路径也能把 scene frame 拉回当前半屏画布。
+    UIInterfaceOrientation splitOrientation = self.hostedInterfaceOrientation;
+    BOOL splitCanvasHosting =
+        NSProcessInfo.processInfo.operatingSystemVersion.majorVersion != 15 &&
+        POIsConcreteInterfaceOrientation(splitOrientation) &&
+        !POSceneSizesMatch([self hostedPresentationCanvasSizeForOrientation:splitOrientation],
+                           POHostedCanvasSizeForOrientation(splitOrientation));
+    if (splitCanvasHosting) {
+        CGSize splitCanvas = [self hostedPresentationCanvasSizeForOrientation:splitOrientation];
+        id currentSettings = [scene respondsToSelector:@selector(settings)] ? [scene settings] : nil;
+        SEL frameGetter = NSSelectorFromString(@"frame");
+        CGRect currentFrame = currentSettings && [currentSettings respondsToSelector:frameGetter]
+            ? ((CGRect (*)(id, SEL))objc_msgSend)(currentSettings, frameGetter)
+            : CGRectZero;
+        if (POSceneSizesMatch(currentFrame.size, splitCanvas)) {
+            return;
+        }
+        __weak typeof(self) weakSelf = self;
+        [self mutateSettingsForScene:scene withBlock:^(id settings){
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            [strongSelf enforceHostedServerFrameOnSettings:settings scene:scene];
+        }];
         return;
     }
 
@@ -3092,7 +3153,7 @@ static BOOL POMainLayerIdentitiesEqual(NSArray<FBSceneLayer *> *lhs,
         hostedCanvasIsCanonicalLandscape && shellUsesSupportedFullscreenCanvas;
 
     UIInterfaceOrientation sourceOrientation = [self hostedPresentationSourceOrientation];
-    CGSize mainStackSize = POHostedCanvasSizeForOrientation(sourceOrientation);
+    CGSize mainStackSize = [self hostedPresentationCanvasSizeForOrientation:sourceOrientation];
     if (mainStackSize.width <= 0 || mainStackSize.height <= 0) {
         mainStackSize = targetStackSize;
     }
