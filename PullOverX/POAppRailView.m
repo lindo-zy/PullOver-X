@@ -82,6 +82,8 @@
     BOOL hapticsEnabled;
     POAppRailTile *sideSwitchButton;
     BOOL sideSwitchEnabled;
+    // 悬浮网格的毛玻璃底衬:铺在可视区底层,把图标网格和当前界面区分开。
+    UIVisualEffectView *gridBackdropView;
     // 重排守卫记录的"布局轴长度":竖排存可视区高度,横排存可视区宽度。
     CGFloat lastLayoutAxisLength;
 }
@@ -104,6 +106,16 @@
         self.layer.cornerRadius = tileSide * PO_APP_RAIL_CORNER_RADIUS_RATIO;
         self.layer.cornerCurve = kCACornerCurveContinuous;
 
+        UIBlurEffect *backdropBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial];
+        gridBackdropView = [[UIVisualEffectView alloc] initWithEffect:backdropBlur];
+        gridBackdropView.userInteractionEnabled = NO;
+        gridBackdropView.hidden = YES;
+        gridBackdropView.layer.cornerRadius = self.layer.cornerRadius;
+        gridBackdropView.layer.cornerCurve = kCACornerCurveContinuous;
+        gridBackdropView.clipsToBounds = YES;
+        // 第一个加入,保证始终垫在后续添加的图标瓦片和换边按钮底下。
+        [self addSubview:gridBackdropView];
+
         railPanGestureRecognizer = [[UIPanGestureRecognizer alloc] initWithTarget:self
                                                                          action:@selector(railPan:)];
         railPanGestureRecognizer.delegate = self;
@@ -124,6 +136,16 @@
 
 - (CGFloat)tileSize {
     return tileSide;
+}
+
+// 换边按钮只在贴边竖栏显示;悬浮居中网格不显示,几何占位一并去掉。
+- (BOOL)sideSwitchVisible {
+    return sideSwitchEnabled && !self.horizontalLayout;
+}
+
+// 悬浮网格图标固定从左往右正常排布,不做左手镜像;贴边竖栏维持原镜像逻辑。
+- (CGAffineTransform)iconLayoutTransformForCurrentLayout {
+    return self.horizontalLayout ? CGAffineTransformIdentity : [self iconLayoutTransform];
 }
 
 - (CGSize)preferredContentSize {
@@ -156,8 +178,8 @@
     CGFloat contentWidth = MIN(maxWidth,
                                filledColumns * tileSide + (filledColumns - 1) * PO_APP_RAIL_TILE_GAP);
     CGFloat contentHeight = rows * tileSide + (rows - 1) * PO_APP_RAIL_TILE_GAP;
-    if (sideSwitchEnabled) {
-        // 换边按钮钉在可视区右下角,底部留出一行按钮占位。
+    if (sideSwitchEnabled && !self.horizontalLayout) {
+        // 贴边竖栏的换边按钮钉在底部,留出一行按钮占位;悬浮网格不显示按钮。
         contentHeight += PO_APP_RAIL_TILE_GAP + tileSide;
     }
     contentWidth = MAX(contentWidth, tileSide);
@@ -194,6 +216,7 @@
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self
                                                                             action:@selector(sideSwitchTapped:)];
     [sideSwitchButton addGestureRecognizer:tap];
+    sideSwitchButton.hidden = ![self sideSwitchVisible];
     [self addSubview:sideSwitchButton];
     [self setNeedsLayout];
 }
@@ -204,6 +227,9 @@
     tileSide = MAX(1, tileSize);
     activeBundleId = [newActiveBundleId copy];
     hapticsEnabled = [[POApplicationHelper settings][@"hapticFeedback"] boolValue];
+    // 瓦片尺寸变化后(悬浮网格放大一倍)同步自身与底衬圆角,大卡片配大圆角。
+    self.layer.cornerRadius = tileSide * PO_APP_RAIL_CORNER_RADIUS_RATIO;
+    gridBackdropView.layer.cornerRadius = self.layer.cornerRadius;
     [self reloadSideSwitchButton];
 
     for (POAppRailTile *tile in tiles) {
@@ -218,7 +244,7 @@
         POAppRailTile *tile = [[POAppRailTile alloc] initWithTileSize:tileSide];
         tile.bundleId = bundleId;
         tile.iconView.image = [POApplicationHelper imageForBundleId:bundleId];
-        tile.iconView.transform = [self iconLayoutTransform];
+        tile.iconView.transform = [self iconLayoutTransformForCurrentLayout];
 
         SBApplication *application = [[objc_getClass("SBApplicationController") sharedInstance]
             applicationWithBundleIdentifier:bundleId];
@@ -258,15 +284,16 @@
 
 - (void)layoutTiles {
     NSUInteger count = tiles.count;
-    CGFloat sideInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
+    CGFloat sideInset = [self sideSwitchVisible] ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
+    CGAffineTransform iconTransform = [self iconLayoutTransformForCurrentLayout];
     if (self.horizontalLayout) {
-        // 悬浮网格:按可视区宽度折行成多排,超高时竖向滚动;换边按钮钉在
-        // 可视区右下角,底部内边距让最后一排可以滚到按钮上方。
+        // 悬浮网格:按可视区宽度从左往右折行成多排,超高时竖向滚动;不显示
+        // 换边按钮,底部无占位内边距,最后一排可以贴着毛玻璃底衬滚到底。
         CGFloat columns = [self gridColumnsForWidth:CGRectGetWidth(self.bounds)];
         CGFloat rows = MAX(1.0, ceil((CGFloat)count / columns));
         CGFloat contentHeight = rows * tileSide + (rows - 1) * PO_APP_RAIL_TILE_GAP;
         self.contentSize = CGSizeMake(CGRectGetWidth(self.bounds), contentHeight);
-        self.contentInset = UIEdgeInsetsMake(0, 0, sideInset, 0);
+        self.contentInset = UIEdgeInsetsZero;
         self.scrollEnabled = contentHeight + sideInset > CGRectGetHeight(self.bounds) + 0.5;
         for (NSUInteger index = 0; index < count; index++) {
             POAppRailTile *tile = tiles[index];
@@ -275,6 +302,7 @@
             tile.frame = CGRectMake(column * (tileSide + PO_APP_RAIL_TILE_GAP),
                                     row * (tileSide + PO_APP_RAIL_TILE_GAP),
                                     tileSide, tileSide);
+            tile.iconView.transform = iconTransform;
             [tile setHighlighted:[tile.bundleId isEqualToString:activeBundleId]];
         }
         lastLayoutAxisLength = CGRectGetWidth(self.bounds);
@@ -308,6 +336,7 @@
             tileY = middleOriginY + tileSide * (index - 1) + PO_APP_RAIL_TILE_GAP * (index - 1);
         }
         tile.frame = CGRectMake(0, tileY, tileSide, tileSide);
+        tile.iconView.transform = iconTransform;
         [tile setHighlighted:[tile.bundleId isEqualToString:activeBundleId]];
     }
     lastLayoutAxisLength = CGRectGetHeight(self.bounds);
@@ -323,19 +352,19 @@
     if (axisLength != lastLayoutAxisLength) {
         [self layoutTiles];
     }
-    CGFloat sideInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
+    CGFloat sideInset = [self sideSwitchVisible] ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
     // 竖排与悬浮网格都在高度方向滚动(网格宽度折行后不超可视区宽)。
     self.scrollEnabled = self.contentSize.height + sideInset > CGRectGetHeight(self.bounds) + 0.5;
-    if (sideSwitchButton) {
-        if (self.horizontalLayout) {
-            // bounds.origin 随滚动变化,按可视区右下角取框让按钮始终钉在右下。
-            sideSwitchButton.frame = CGRectMake(CGRectGetMaxX(self.bounds) - tileSide,
-                                                CGRectGetMaxY(self.bounds) - tileSide,
-                                                tileSide, tileSide);
-        } else {
-            // bounds.origin 随滚动变化,按其最大 Y 取框让按钮始终钉在可视区底部。
-            sideSwitchButton.frame = CGRectMake(0, CGRectGetMaxY(self.bounds) - tileSide, tileSide, tileSide);
-        }
+    // 悬浮网格的毛玻璃底衬只在该形态显示;bounds.origin 随滚动变化,
+    // 按可视区取框让底衬始终铺满可视区而不随内容滚动。
+    gridBackdropView.hidden = !self.horizontalLayout;
+    gridBackdropView.frame = self.bounds;
+    // 悬浮网格不显示换边按钮,隐藏后触摸也不会命中。
+    BOOL sideSwitchVisible = [self sideSwitchVisible];
+    sideSwitchButton.hidden = !sideSwitchVisible;
+    if (sideSwitchButton && sideSwitchVisible) {
+        // bounds.origin 随滚动变化,按其最大 Y 取框让按钮始终钉在可视区底部。
+        sideSwitchButton.frame = CGRectMake(0, CGRectGetMaxY(self.bounds) - tileSide, tileSide, tileSide);
     }
 }
 
@@ -346,7 +375,7 @@
 }
 
 - (void)refreshLayoutDirection {
-    CGAffineTransform iconTransform = [self iconLayoutTransform];
+    CGAffineTransform iconTransform = [self iconLayoutTransformForCurrentLayout];
     for (POAppRailTile *tile in tiles) {
         tile.iconView.transform = iconTransform;
     }
