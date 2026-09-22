@@ -122,6 +122,10 @@
     return self;
 }
 
+- (CGFloat)tileSize {
+    return tileSide;
+}
+
 - (CGSize)preferredContentSize {
     NSUInteger count = tiles.count;
     CGFloat height = count > 0 ? tileSide * count + PO_APP_RAIL_TILE_GAP * (count - 1) : 0;

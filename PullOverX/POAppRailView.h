@@ -42,6 +42,10 @@
                      activeBundleId:(NSString *)activeBundleId
                            tileSize:(CGFloat)tileSize;
 
+// 当前瓦片边长(最近一次 reload 传入的 tileSize)。控制器据此判断形态切换后
+// 瓦片尺寸是否需要重载。
+@property (nonatomic, readonly) CGFloat tileSize;
+
 // 重载后的自然内容尺寸(未按屏幕裁剪),供控制器计算最终 frame。
 - (CGSize)preferredContentSize;
 

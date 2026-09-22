@@ -3067,7 +3067,15 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         return;
     }
     deferredOpenGeneration += 1;
+    // 从悬浮网格进入小窗:立即收起常驻竖栏,否则竖栏会带着悬浮形态和放大
+    // 瓦片一路"已显示"到面板打开完成,setAppRailShown 因状态未变只重定位
+    // 不重载,大图标残留。收起后由 finishPanelSnapToOpenState 以边缘列形态
+    // 重新唤出并按正常尺寸 reload。
+    BOOL railWasNubRevealed = nubRevealRailActive;
     nubRevealRailActive = NO;
+    if (railWasNubRevealed) {
+        [self updateAppRailVisibilityAnimated:YES];
+    }
     [self cancelAutoNubTimer];
     [self removeKeyboardZoomSuspension:POKeyboardZoomSuspensionClosing];
     [self beginSplitSessionIfNeeded];
@@ -3275,6 +3283,14 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         return;
     }
     CGFloat tileSize = CGRectGetWidth(self.handle.frame);
+    // 形态切换(悬浮网格 ↔ 边缘列)可能不经过"隐藏再显示"循环,瓦片尺寸
+    // 没跟上时强制整体重载,避免上一形态的放大图标残留。重载末尾会再次走到
+    // 这里,尺寸一致后正常继续,不会递归。
+    CGFloat expectedTileSize = [self railFloatsCenteredInClosedState] ? tileSize * 2.0 : tileSize;
+    if (expectedTileSize > 0 && appRailView.tileSize != expectedTileSize) {
+        [self layoutAppRail];
+        return;
+    }
     CGFloat margin = 10.0;
     CGFloat topLimit = self.view.safeAreaInsets.top + margin;
     CGFloat bottomLimit = CGRectGetHeight(self.view.bounds) - self.view.safeAreaInsets.bottom - margin;
@@ -3376,6 +3392,12 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     if ([bundleId isEqualToString:pinnedBundleId]) {
         [self handle:self.handle didReceiveTap:nil];
         return;
+    }
+    // 悬浮网格点选后立即收起,不让网格悬在打开过渡上;面板就绪后竖栏以
+    // 边缘列形态重新唤出并按正常尺寸重载。
+    if ([self railFloatsCenteredInClosedState]) {
+        nubRevealRailActive = NO;
+        [self updateAppRailVisibilityAnimated:YES];
     }
     [self pinAppWithBundleId:bundleId];
 }
