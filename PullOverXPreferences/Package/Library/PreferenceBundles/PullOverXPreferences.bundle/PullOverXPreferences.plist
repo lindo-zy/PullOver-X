@@ -471,7 +471,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>When enabled, the rail revealed by tapping the nubbed handle floats at the center of the screen, and moves above the keyboard while the keyboard is visible. Turn it off to keep that rail in the handle's edge column.</string>
+			<string>When enabled, the rail revealed by tapping the nubbed handle floats as a horizontal row of icons at the center of the screen, and moves above the keyboard while the keyboard is visible. Turn it off to keep that rail in the handle's edge column.</string>
 		</dict>
 		<dict>
 			<key>cell</key>

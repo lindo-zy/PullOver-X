@@ -3244,6 +3244,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         [bundleIds insertObject:pinnedBundleId atIndex:0];
     }
     appRailView.centeredIcons = [self railUsesCenteredIcons];
+    appRailView.horizontalLayout = [self railFloatsCenteredInClosedState];
     [appRailView reloadWithBundleIdentifiers:bundleIds.array
                               activeBundleId:pinnedBundleId
                                     tileSize:self.handle.frame.size.width];
@@ -3276,7 +3277,9 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     // 靠这里翻转 centeredIcons 并切换为全跨度 frame,竖栏顶部钳在 topLimit。
     BOOL centeredIcons = [self railUsesCenteredIcons];
     appRailView.centeredIcons = centeredIcons;
-    if ([self railFloatsCenteredInClosedState]) {
+    BOOL floatsCentered = [self railFloatsCenteredInClosedState];
+    appRailView.horizontalLayout = floatsCentered;
+    if (floatsCentered) {
         [self positionAppRailFloatingCenteredWithTileSize:tileSize
                                                  topLimit:topLimit
                                               bottomLimit:bottomLimit];
@@ -3296,15 +3299,14 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     appRailView.frame = CGRectMake(CGRectGetMinX(handleFrame), railY, tileSize, railHeight);
 }
 
-// 缩点唤出的悬浮竖栏:整列水平居中,垂直在可用空间内居中。键盘可见且自然落位
-// 会压到键盘时,把可用底界抬到键盘上缘上方再重新居中;空间放不下时压缩竖栏
-// 高度,多出的图标靠竖栏内部滚动。键盘收起后由 updateFloatingAppRailForKeyboard
+// 缩点唤出的悬浮竖栏:横向一排图标,整排水平居中、垂直在可用空间内居中,
+// 宽度放不下时横向滚动(内部布局)。键盘可见且自然落位会压到键盘时,把可用
+// 底界抬到键盘上缘上方再重新居中。键盘收起后由 updateFloatingAppRailForKeyboard
 // 带着键盘动画落回屏幕中央。
 -(void)positionAppRailFloatingCenteredWithTileSize:(CGFloat)tileSize
                                           topLimit:(CGFloat)topLimit
                                        bottomLimit:(CGFloat)bottomLimit{
-    CGFloat railHeight = MIN(appRailView.preferredContentSize.height, MAX(0, bottomLimit - topLimit));
-    railHeight = MAX(railHeight, tileSize);
+    CGFloat railHeight = tileSize;
     CGFloat railY = topLimit + MAX(0, (bottomLimit - topLimit - railHeight) / 2.0);
     if (keyboardNotificationState == POKeyboardNotificationStateVisible &&
         !CGRectIsEmpty(floatingRailKeyboardFrame)) {
@@ -3312,13 +3314,15 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         CGFloat keyboardTopLimit = CGRectGetMinY(floatingRailKeyboardFrame) - keyboardGap;
         if (keyboardTopLimit >= topLimit && railY + railHeight > keyboardTopLimit) {
             CGFloat availableHeight = MAX(0, keyboardTopLimit - topLimit);
-            railHeight = MIN(appRailView.preferredContentSize.height, MAX(availableHeight, tileSize));
-            railHeight = MAX(railHeight, tileSize);
             railY = topLimit + MAX(0, (availableHeight - railHeight) / 2.0);
         }
     }
-    CGFloat railX = (CGRectGetWidth(self.view.bounds) - tileSize) / 2.0;
-    appRailView.frame = CGRectMake(railX, railY, tileSize, railHeight);
+    CGFloat margin = 10.0;
+    CGFloat maxWidth = MAX(0, CGRectGetWidth(self.view.bounds) - margin * 2.0);
+    CGFloat railWidth = MIN(appRailView.preferredContentSize.width, maxWidth);
+    railWidth = MAX(railWidth, tileSize);
+    CGFloat railX = (CGRectGetWidth(self.view.bounds) - railWidth) / 2.0;
+    appRailView.frame = CGRectMake(railX, railY, railWidth, railHeight);
 }
 
 // 键盘通知里的目标 frame 换算到控制器视图坐标,供悬浮竖栏避让使用;

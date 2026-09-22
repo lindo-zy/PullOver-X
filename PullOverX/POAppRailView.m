@@ -82,7 +82,8 @@
     BOOL hapticsEnabled;
     POAppRailTile *sideSwitchButton;
     BOOL sideSwitchEnabled;
-    CGFloat lastCenteredLayoutHeight;
+    // 重排守卫记录的"布局轴长度":竖排存可视区高度,横排存可视区宽度。
+    CGFloat lastLayoutAxisLength;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -123,14 +124,15 @@
 
 - (CGSize)preferredContentSize {
     NSUInteger count = tiles.count;
-    CGFloat height = count > 0 ? tileSide * count + PO_APP_RAIL_TILE_GAP * (count - 1) : 0;
+    CGFloat extent = count > 0 ? tileSide * count + PO_APP_RAIL_TILE_GAP * (count - 1) : 0;
     if (sideSwitchEnabled) {
-        height = height > 0 ? height + PO_APP_RAIL_TILE_GAP + tileSide : tileSide;
+        extent = extent > 0 ? extent + PO_APP_RAIL_TILE_GAP + tileSide : tileSide;
     }
-    if (height <= 0) {
-        height = tileSide;
+    if (extent <= 0) {
+        extent = tileSide;
     }
-    return CGSizeMake(tileSide, height);
+    // 竖排返回{宽,自然高},横排返回{自然宽,高};控制器据此裁剪最终 frame。
+    return self.horizontalLayout ? CGSizeMake(extent, tileSide) : CGSizeMake(tileSide, extent);
 }
 
 // 底部"把手左右切换"按钮:开关关闭时整体移除,不显示也不响应。
@@ -210,13 +212,39 @@
         return;
     }
     _centeredIcons = centeredIcons;
-    lastCenteredLayoutHeight = -1.0;
+    lastLayoutAxisLength = -1.0;
+    [self setNeedsLayout];
+}
+
+// 横排/竖排切换同样强制重排:布局轴从高度换成宽度,旧守卫值不可信。
+- (void)setHorizontalLayout:(BOOL)horizontalLayout {
+    if (_horizontalLayout == horizontalLayout) {
+        return;
+    }
+    _horizontalLayout = horizontalLayout;
+    lastLayoutAxisLength = -1.0;
     [self setNeedsLayout];
 }
 
 - (void)layoutTiles {
     NSUInteger count = tiles.count;
-    CGFloat bottomInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
+    CGFloat sideInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
+    if (self.horizontalLayout) {
+        // 悬浮横排:图标一行排开,放不下时横向滚动,换边按钮钉在可视区右端
+        // (底部内边距挪到右侧,让最后的图标可以滚到按钮左边)。
+        CGFloat contentWidth = tileSide * count + PO_APP_RAIL_TILE_GAP * MAX(0, (NSInteger)count - 1);
+        contentWidth = MAX(contentWidth, tileSide);
+        self.contentSize = CGSizeMake(contentWidth, tileSide);
+        self.contentInset = UIEdgeInsetsMake(0, 0, 0, sideInset);
+        self.scrollEnabled = contentWidth + sideInset > CGRectGetWidth(self.bounds) + 0.5;
+        for (NSUInteger index = 0; index < count; index++) {
+            POAppRailTile *tile = tiles[index];
+            tile.frame = CGRectMake(tileSide * index + PO_APP_RAIL_TILE_GAP * index, 0, tileSide, tileSide);
+            [tile setHighlighted:[tile.bundleId isEqualToString:activeBundleId]];
+        }
+        lastLayoutAxisLength = CGRectGetWidth(self.bounds);
+        return;
+    }
     CGFloat contentHeight;
     // 居中展开:第一个图标钉在竖栏顶部,其余图标从可视区垂直中点开始往下排。
     CGFloat middleOriginY = 0;
@@ -226,7 +254,7 @@
     // 此时整体退回紧凑排布,靠滚动展示全部图标,不再做首尾分离布局。
     BOOL centered = self.centeredIcons && count > 1 &&
         floor(availableHeight / 2.0) >= tileSide + PO_APP_RAIL_TILE_GAP &&
-        floor(availableHeight / 2.0) + middleHeight <= availableHeight - bottomInset + 0.5;
+        floor(availableHeight / 2.0) + middleHeight <= availableHeight - sideInset + 0.5;
     if (centered) {
         middleOriginY = floor(availableHeight / 2.0);
         contentHeight = MAX(tileSide, middleOriginY + middleHeight);
@@ -236,8 +264,8 @@
     }
     self.contentSize = CGSizeMake(tileSide, contentHeight);
     // 换边按钮固定在竖栏底部不随内容滚动,底部内边距让最后的图标可以滚到按钮上方。
-    self.contentInset = UIEdgeInsetsMake(0, 0, bottomInset, 0);
-    self.scrollEnabled = contentHeight + bottomInset > CGRectGetHeight(self.bounds) + 0.5;
+    self.contentInset = UIEdgeInsetsMake(0, 0, sideInset, 0);
+    self.scrollEnabled = contentHeight + sideInset > CGRectGetHeight(self.bounds) + 0.5;
     for (NSUInteger index = 0; index < count; index++) {
         POAppRailTile *tile = tiles[index];
         CGFloat tileY = tileSide * index + PO_APP_RAIL_TILE_GAP * index;
@@ -247,21 +275,33 @@
         tile.frame = CGRectMake(0, tileY, tileSide, tileSide);
         [tile setHighlighted:[tile.bundleId isEqualToString:activeBundleId]];
     }
-    lastCenteredLayoutHeight = CGRectGetHeight(self.bounds);
+    lastLayoutAxisLength = CGRectGetHeight(self.bounds);
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    // reload 时 frame 还没定,居中排布里"其余图标"的起点取决于可视区高度,
-    // 控制器定完 frame 后这里按最新高度重排一次,首秀和旋转都靠这一步纠正。
-    if (CGRectGetHeight(self.bounds) != lastCenteredLayoutHeight) {
+    // reload 时 frame 还没定,排布起点取决于可视区尺寸(竖排看高度、横排看宽度),
+    // 控制器定完 frame 后这里按最新尺寸重排一次,首秀和旋转都靠这一步纠正。
+    CGFloat axisLength = self.horizontalLayout
+        ? CGRectGetWidth(self.bounds)
+        : CGRectGetHeight(self.bounds);
+    if (axisLength != lastLayoutAxisLength) {
         [self layoutTiles];
     }
-    CGFloat bottomInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
-    self.scrollEnabled = self.contentSize.height + bottomInset > CGRectGetHeight(self.bounds) + 0.5;
+    CGFloat sideInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
+    if (self.horizontalLayout) {
+        self.scrollEnabled = self.contentSize.width + sideInset > CGRectGetWidth(self.bounds) + 0.5;
+    } else {
+        self.scrollEnabled = self.contentSize.height + sideInset > CGRectGetHeight(self.bounds) + 0.5;
+    }
     if (sideSwitchButton) {
-        // bounds.origin 随滚动变化,按其最大 Y 取框让按钮始终钉在可视区底部。
-        sideSwitchButton.frame = CGRectMake(0, CGRectGetMaxY(self.bounds) - tileSide, tileSide, tileSide);
+        if (self.horizontalLayout) {
+            // bounds.origin 随滚动变化,按其最大 X 取框让按钮始终钉在可视区右端。
+            sideSwitchButton.frame = CGRectMake(CGRectGetMaxX(self.bounds) - tileSide, 0, tileSide, tileSide);
+        } else {
+            // bounds.origin 随滚动变化,按其最大 Y 取框让按钮始终钉在可视区底部。
+            sideSwitchButton.frame = CGRectMake(0, CGRectGetMaxY(self.bounds) - tileSide, tileSide, tileSide);
+        }
     }
 }
 
@@ -289,10 +329,14 @@
 
 - (UIView *)longPressAnchorViewForRecognizer:(UILongPressGestureRecognizer *)recognizer {
     CGPoint point = [recognizer locationInView:self];
+    BOOL horizontal = self.horizontalLayout;
     POAppRailTile *nearest = nil;
     CGFloat nearestDistance = CGFLOAT_MAX;
     for (POAppRailTile *tile in tiles) {
-        CGFloat distance = fabs(CGRectGetMidY(tile.frame) - point.y);
+        // 横排按 X 距离就近命中,竖排按 Y 距离。
+        CGFloat distance = horizontal
+            ? fabs(CGRectGetMidX(tile.frame) - point.x)
+            : fabs(CGRectGetMidY(tile.frame) - point.y);
         if (distance < nearestDistance) {
             nearestDistance = distance;
             nearest = tile;
@@ -329,6 +373,10 @@
 
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
     if (gestureRecognizer == railPanGestureRecognizer) {
+        // 横排时横向拖拽是列表自身的滚动,驱动小窗开合的转发手势不再接管。
+        if (self.horizontalLayout) {
+            return NO;
+        }
         CGPoint velocity = [railPanGestureRecognizer velocityInView:self];
         return fabs(velocity.x) > fabs(velocity.y);
     }

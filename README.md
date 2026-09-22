@@ -23,7 +23,7 @@ The feature can be toggled in settings ("External Wake"), and repeated notificat
 
 ## Nub Rail Float
 
-Tapping the nubbed (shrunk) handle reveals the app rail floating at the center of the screen. While the keyboard is visible, the rail automatically moves above the keyboard and falls back to the center when it hides. Toggle it in settings ("Float Nub Rail Centered"); turning it off keeps the rail in the handle's edge column.
+Tapping the nubbed (shrunk) handle reveals the app rail floating at the center of the screen as a horizontal row of icons (scrollable when it overflows). While the keyboard is visible, the rail automatically moves above the keyboard and falls back to the center when it hides. Toggle it in settings ("Float Nub Rail Centered"); turning it off keeps the rail in the handle's edge column.
 
 ## License
 
