@@ -7,6 +7,7 @@
 
 #import "PullOverViewController.h"
 #import "POHostSessionController.h"
+#import "POHostedWindowChromeView.h"
 #import "POQuickSwitchDragCoordinator.h"
 #import "POQuickSwitchMetrics.h"
 #import "POSplitSessionController.h"
@@ -29,6 +30,13 @@
 #define PO_SCALED_PROGRAMMATIC_CLOSE_DURATION 0.28
 #define PO_SCALED_CLOSE_POST_COMMIT_CLEANUP_DELAY 0.035
 #define PO_HANDLE_GUARD_MINIMUM_REVEAL_DURATION 2.0
+// 分屏悬浮窗口(DynamicStage 式真悬浮):进入悬浮的最小外扩倍数、回到钉底的最大
+// 收缩比例(相对悬浮默认框)、双指超限拉伸(预夹紧尺寸越过窗口上限的倍数)触发全屏接管。
+#define PO_HOSTED_FLOAT_ANIMATION_DURATION 0.24
+#define PO_HOSTED_FLOAT_ENTER_FACTOR 1.12
+#define PO_HOSTED_FLOAT_EXIT_FRACTION 0.80
+#define PO_HOSTED_FLOAT_TAKEOVER_OVERSPREAD_FACTOR 1.25
+#define PO_HOSTED_FLOAT_MIN_WIDTH 140.0
 
 typedef NS_OPTIONS(NSUInteger, POKeyboardZoomSuspensionReason) {
     POKeyboardZoomSuspensionNone     = 0,
@@ -103,7 +111,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
 }
 
-@interface PullOverViewController ()<POHostSessionControllerDelegate, UIGestureRecognizerDelegate, POAppRailViewDelegate>{
+@interface PullOverViewController ()<POHostSessionControllerDelegate, UIGestureRecognizerDelegate, POAppRailViewDelegate, POHostedWindowChromeViewDelegate>{
     NSString *pinnedBundleId;
     UIView *contextView;
     UIView *externalSceneStack;
@@ -210,6 +218,15 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     UIViewAnimationOptions lastKeyboardAnimationOptions;
     NSNumber *origOffset;
     CGSize lastLaidOutSize;
+    // 分屏会话内的悬浮窗口状态:卡片脱离下半区钉底后可拖动/双指缩放。
+    POHostedWindowChromeView *hostedWindowChrome;
+    UIPinchGestureRecognizer *hostedWindowPinchGestureRecognizer;
+    BOOL hostedWindowFloating;
+    CGRect hostedFloatingWindowFrame;
+    CGRect splitPinnedCardFrame;
+    BOOL hostedWindowPinchActive;
+    BOOL hostedWindowPinchStartedFloating;
+    CGRect hostedWindowPinchBaseFrame;
 }
 
 -(void)retainPresentationAfterReleaseIfPossible;
@@ -355,6 +372,18 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [keyboardZoomContainer addSubview:shadowView];
 
     [keyboardZoomContainer addSubview:self.contentView];
+
+    // 分屏/悬浮窗口 chrome:关闭按钮 + 悬浮拖动条;双指捏合做形态缩放。
+    hostedWindowChrome = [[POHostedWindowChromeView alloc] initWithFrame:CGRectZero];
+    hostedWindowChrome.delegate = self;
+    hostedWindowChrome.mode = POHostedWindowChromeModeHidden;
+    hostedWindowChrome.hidden = YES;
+    [self.contentView addSubview:hostedWindowChrome];
+
+    hostedWindowPinchGestureRecognizer = [[UIPinchGestureRecognizer alloc]
+        initWithTarget:self action:@selector(handleHostedWindowPinch:)];
+    hostedWindowPinchGestureRecognizer.delegate = self;
+    [keyboardZoomContainer addGestureRecognizer:hostedWindowPinchGestureRecognizer];
 
     NSString *savedPinnedBundleId = [[NSUserDefaults standardUserDefaults] stringForKey:@"lastPinnedBundleId"];
     if ([POApplicationHelper isUserFacingApplicationBundleId:savedPinnedBundleId]) {
@@ -628,6 +657,10 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 }
 
 -(BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer{
+    if (gestureRecognizer == hostedWindowPinchGestureRecognizer) {
+        // 双指捏合仅用于分屏会话内的卡片形态缩放,其余形态让手势穿透给托管 App。
+        return [self isHostedFloatingWindowEligible];
+    }
     if (gestureRecognizer == panelBackdropTapGestureRecognizer) {
         return [self currentInteractionMode] == POInteractionModeDrawerModal &&
             panelState == POPanelStateOpen && ![self isPanelTransitioning];
@@ -2241,6 +2274,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         [self hidePresentationContainer];
         shadowView.layer.shadowOpacity = 0;
         splitLayoutActive = NO;
+        [self resetHostedFloatingWindowState];
         BOOL deferSessionCleanup = deferScaledCloseSessionCleanup;
         deferScaledCloseSessionCleanup = NO;
         if (!deferSessionCleanup) {
@@ -2535,6 +2569,346 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [self syncHorizontalQuickSwitchPresentationAnchor];
 }
 
+#pragma mark - 分屏悬浮窗口(DynamicStage 式真悬浮:可关闭/拖动/双指缩放)
+
+// 悬浮窗口只在分屏会话内可用:面板完全打开、空闲且托管内容已发布。
+-(BOOL)isHostedFloatingWindowEligible{
+    return panelState == POPanelStateOpen && splitLayoutActive && contextView != nil &&
+        !hostedCategoryTransitionPending && !runtimeHostedCategoryTransitionAnimating &&
+        !scrollSnapAnimationInProgress && !scrollView.dragging && !scrollView.decelerating;
+}
+
+// 悬浮窗口的画布宽高比:优先发布源画布,保证任意尺寸下保持比例。
+-(CGSize)hostedFloatingAspectCanvasSize{
+    CGSize canvas = presentationSourceCanvasSize;
+    if (canvas.width <= 0 || canvas.height <= 0) {
+        canvas = [self contextManagerPreferredSceneStackSize:nil];
+    }
+    if (canvas.width <= 0 || canvas.height <= 0) {
+        canvas = self.view.bounds.size;
+    }
+    return canvas;
+}
+
+// 画布等比放入盒子内的最大尺寸。
+-(CGSize)hostedFloatingSizeByFittingCanvas:(CGSize)canvas intoBox:(CGSize)box{
+    if (canvas.width <= 0 || canvas.height <= 0 || box.width <= 0 || box.height <= 0) {
+        return CGSizeMake(MAX(1.0, box.width), MAX(1.0, box.height));
+    }
+    CGFloat fitScale = MIN(box.width / canvas.width, box.height / canvas.height);
+    return CGSizeMake(floorf(canvas.width * fitScale), floorf(canvas.height * fitScale));
+}
+
+-(CGFloat)hostedFloatingTopInsetForBounds:(CGRect)bounds{
+    UIEdgeInsets viewInsets = self.view.safeAreaInsets;
+    UIEdgeInsets windowInsets = self.view.window.safeAreaInsets;
+    return MAX(viewInsets.top, windowInsets.top);
+}
+
+-(CGFloat)hostedFloatingBottomInsetForBounds:(CGRect)bounds{
+    UIEdgeInsets viewInsets = self.view.safeAreaInsets;
+    UIEdgeInsets windowInsets = self.view.window.safeAreaInsets;
+    return MAX(viewInsets.bottom, windowInsets.bottom);
+}
+
+// 悬浮默认形态("半屏"锚点):画布等比放入屏宽 92% × 可用高 52%,水平居中、贴顶部安全区。
+-(CGRect)hostedFloatingDefaultFrameForBounds:(CGRect)bounds{
+    CGFloat topInset = [self hostedFloatingTopInsetForBounds:bounds];
+    CGFloat bottomInset = [self hostedFloatingBottomInsetForBounds:bounds];
+    CGSize box = CGSizeMake(CGRectGetWidth(bounds) * 0.92,
+                            MAX(1.0, (CGRectGetHeight(bounds) - topInset - bottomInset) * 0.52));
+    CGSize target = [self hostedFloatingSizeByFittingCanvas:[self hostedFloatingAspectCanvasSize]
+                                                     intoBox:box];
+    CGFloat originX = floorf((CGRectGetWidth(bounds) - target.width) / 2.0);
+    CGFloat originY = floorf(topInset + POHostedWindowChromeView.barHeight + CONTENT_EDGE_GAP);
+    return CGRectMake(originX, originY, target.width, target.height);
+}
+
+// 悬浮框夹紧:尺寸超限按画布比例收敛(上限为全屏宽/可用高,与钉底卡同宽级),
+// 位置限制在屏幕安全区内。
+-(CGRect)clampedHostedFloatingFrameForBounds:(CGRect)bounds frame:(CGRect)frame{
+    CGFloat topInset = [self hostedFloatingTopInsetForBounds:bounds];
+    CGFloat bottomInset = [self hostedFloatingBottomInsetForBounds:bounds];
+    CGFloat maxWidth = CGRectGetWidth(bounds);
+    CGFloat maxHeight = CGRectGetHeight(bounds) - topInset - bottomInset;
+    if (maxWidth <= 0 || maxHeight <= 0) {
+        return frame;
+    }
+    CGSize canvas = [self hostedFloatingAspectCanvasSize];
+    CGFloat aspect = canvas.width > 0 ? canvas.height / canvas.width : 1.0;
+
+    CGFloat width = MIN(MAX(CGRectGetWidth(frame), PO_HOSTED_FLOAT_MIN_WIDTH), maxWidth);
+    CGFloat height = width * aspect;
+    if (height > maxHeight) {
+        height = maxHeight;
+        width = MIN(maxWidth, height / MAX(0.0001, aspect));
+        width = MAX(width, MIN(PO_HOSTED_FLOAT_MIN_WIDTH, maxWidth));
+    }
+    CGFloat originX = CGRectGetMinX(frame);
+    CGFloat originY = CGRectGetMinY(frame);
+    originX = MIN(MAX(originX, 0.0), CGRectGetWidth(bounds) - width);
+    originY = MIN(MAX(originY, topInset), CGRectGetHeight(bounds) - bottomInset - height);
+    return CGRectMake(floorf(originX), floorf(originY), floorf(width), floorf(height));
+}
+
+// 悬浮 frame(self.view 坐标)落到卡片容器(scrollView 坐标,开态偏移 maximumContentOffsetX)。
+-(void)applyHostedFloatingWindowFrame:(CGRect)frameInView animated:(BOOL)animated{
+    if (!keyboardZoomContainer || !shadowView || !self.contentView) {
+        return;
+    }
+    hostedWindowFloating = YES;
+    hostedFloatingWindowFrame = frameInView;
+    CGFloat maximumOffset = [self maximumContentOffsetX];
+    CGFloat screenScale = UIScreen.mainScreen.scale;
+    CGRect containerFrame = CGRectOffset(frameInView, maximumOffset, 0);
+    containerFrame = CGRectMake(roundf(containerFrame.origin.x * screenScale) / screenScale,
+                                roundf(containerFrame.origin.y * screenScale) / screenScale,
+                                roundf(containerFrame.size.width * screenScale) / screenScale,
+                                roundf(containerFrame.size.height * screenScale) / screenScale);
+    keyboardZoomBaseFrame = containerFrame;
+
+    void (^applyBlock)(void) = ^{
+        self->keyboardZoomContainer.frame = containerFrame;
+        self->shadowView.frame = self->keyboardZoomContainer.bounds;
+        self.contentView.frame = self->keyboardZoomContainer.bounds;
+        self->shadowView.layer.shadowPath =
+            [UIBezierPath bezierPathWithRoundedRect:self->shadowView.bounds
+                                       cornerRadius:CONTENT_CORNER_RADIUS].CGPath;
+        [self layoutContextView];
+        [self updateHostedWindowChrome];
+    };
+    if (animated) {
+        [UIView animateWithDuration:PO_HOSTED_FLOAT_ANIMATION_DURATION
+                              delay:0
+                            options:(UIViewAnimationOptionCurveEaseOut |
+                                     UIViewAnimationOptionBeginFromCurrentState)
+                         animations:applyBlock
+                         completion:nil];
+    } else {
+        [UIView performWithoutAnimation:applyBlock];
+    }
+}
+
+-(void)enterHostedFloatingWindowAnimated:(BOOL)animated{
+    if (![self isHostedFloatingWindowEligible]) {
+        return;
+    }
+    CGRect target = [self hostedFloatingDefaultFrameForBounds:self.view.bounds];
+    [self applyHostedFloatingWindowFrame:target animated:animated];
+}
+
+// 回到分屏钉底形态:借 applyLayout 重算钉底 frame,再从当前位置动画归位。
+-(void)exitHostedFloatingWindowAnimated:(BOOL)animated{
+    hostedWindowFloating = NO;
+    hostedFloatingWindowFrame = CGRectZero;
+    if (!animated || !keyboardZoomContainer) {
+        [self applyLayoutPreservingHandlePosition:YES];
+        return;
+    }
+    CGRect previousFrame = keyboardZoomContainer.frame;
+    [self applyLayoutPreservingHandlePosition:YES];
+    CGRect targetFrame = keyboardZoomContainer.frame;
+    if (CGRectEqualToRect(previousFrame, targetFrame)) {
+        return;
+    }
+    keyboardZoomContainer.frame = previousFrame;
+    [UIView animateWithDuration:PO_HOSTED_FLOAT_ANIMATION_DURATION
+                          delay:0
+                        options:(UIViewAnimationOptionCurveEaseOut |
+                                 UIViewAnimationOptionBeginFromCurrentState)
+                     animations:^{
+        self->keyboardZoomContainer.frame = targetFrame;
+        [self updateHostedWindowChrome];
+    } completion:nil];
+}
+
+-(void)resetHostedFloatingWindowState{
+    hostedWindowFloating = NO;
+    hostedFloatingWindowFrame = CGRectZero;
+    hostedWindowPinchActive = NO;
+    hostedWindowPinchStartedFloating = NO;
+    if (hostedWindowChrome) {
+        [UIView performWithoutAnimation:^{
+            self->hostedWindowChrome.mode = POHostedWindowChromeModeHidden;
+            self->hostedWindowChrome.hidden = YES;
+        }];
+    }
+}
+
+-(void)updateHostedWindowChrome{
+    if (!hostedWindowChrome) {
+        return;
+    }
+    BOOL shouldShow = panelState == POPanelStateOpen && splitLayoutActive && contextView != nil;
+    if (!shouldShow) {
+        hostedWindowChrome.mode = POHostedWindowChromeModeHidden;
+        hostedWindowChrome.hidden = YES;
+        return;
+    }
+    BOOL leftHanded = [[POApplicationHelper settings][@"leftHanded"] boolValue];
+    hostedWindowChrome.closeOnTrailingSide = !leftHanded;
+    if (hostedWindowFloating) {
+        hostedWindowChrome.mode = POHostedWindowChromeModeBar;
+        hostedWindowChrome.frame = CGRectMake(0, 0,
+                                              CGRectGetWidth(self.contentView.bounds),
+                                              POHostedWindowChromeView.barHeight);
+    } else {
+        hostedWindowChrome.mode = POHostedWindowChromeModeCompact;
+        CGFloat badgeSize = POHostedWindowChromeView.compactBadgeSize;
+        CGFloat badgeInset = 6.0;
+        CGFloat badgeX = hostedWindowChrome.closeOnTrailingSide
+            ? CGRectGetWidth(self.contentView.bounds) - badgeSize - badgeInset
+            : badgeInset;
+        hostedWindowChrome.frame = CGRectMake(badgeX, badgeInset, badgeSize, badgeSize);
+    }
+    hostedWindowChrome.hidden = NO;
+    [self.contentView addSubview:hostedWindowChrome];
+}
+
+-(void)handleHostedWindowPinch:(UIPinchGestureRecognizer *)recognizer{
+    switch (recognizer.state) {
+        case UIGestureRecognizerStateBegan: {
+            if (![self isHostedFloatingWindowEligible]) {
+                return;
+            }
+            hostedWindowPinchActive = YES;
+            hostedWindowPinchStartedFloating = hostedWindowFloating;
+            hostedWindowPinchBaseFrame =
+                [keyboardZoomContainer convertRect:keyboardZoomContainer.bounds toView:self.view];
+            break;
+        }
+        case UIGestureRecognizerStateChanged: {
+            if (!hostedWindowPinchActive) {
+                break;
+            }
+            CGFloat factor = recognizer.scale;
+            if (!isfinite(factor) || factor <= 0) {
+                break;
+            }
+            // 钉底形态下捏合(收缩)不进入悬浮,只有外扩才脱离钉底。
+            if (!hostedWindowFloating && factor <= 1.0) {
+                break;
+            }
+            CGRect base = hostedWindowPinchBaseFrame;
+            CGRect candidate = CGRectMake(CGRectGetMidX(base) - CGRectGetWidth(base) * factor / 2.0,
+                                          CGRectGetMidY(base) - CGRectGetHeight(base) * factor / 2.0,
+                                          CGRectGetWidth(base) * factor,
+                                          CGRectGetHeight(base) * factor);
+            candidate = [self clampedHostedFloatingFrameForBounds:self.view.bounds frame:candidate];
+            if (!hostedWindowFloating && !CGRectIsEmpty(splitPinnedCardFrame)) {
+                // 刚脱离钉底时不允许直接缩得比钉底卡小太多。
+                CGFloat minimumWidth = CGRectGetWidth(splitPinnedCardFrame) * 0.62;
+                if (CGRectGetWidth(candidate) < minimumWidth) {
+                    CGFloat aspect =
+                        MAX(0.0001, CGRectGetHeight(candidate) / MAX(1.0, CGRectGetWidth(candidate)));
+                    candidate = CGRectMake(CGRectGetMidX(candidate) - minimumWidth / 2.0,
+                                           CGRectGetMidY(candidate) - minimumWidth * aspect / 2.0,
+                                           minimumWidth, minimumWidth * aspect);
+                    candidate = [self clampedHostedFloatingFrameForBounds:self.view.bounds
+                                                                    frame:candidate];
+                }
+            }
+            [self applyHostedFloatingWindowFrame:candidate animated:NO];
+            break;
+        }
+        case UIGestureRecognizerStateEnded: {
+            if (!hostedWindowPinchActive) {
+                break;
+            }
+            hostedWindowPinchActive = NO;
+            CGRect bounds = self.view.bounds;
+            CGRect finalFrame =
+                [keyboardZoomContainer convertRect:keyboardZoomContainer.bounds toView:self.view];
+            CGFloat stretchedWidth = CGRectGetWidth(hostedWindowPinchBaseFrame) * recognizer.scale;
+            CGFloat stretchedHeight = CGRectGetHeight(hostedWindowPinchBaseFrame) * recognizer.scale;
+            CGFloat maxWidth = CGRectGetWidth(bounds);
+            CGFloat maxHeight = CGRectGetHeight(bounds) -
+                [self hostedFloatingTopInsetForBounds:bounds] -
+                [self hostedFloatingBottomInsetForBounds:bounds];
+            // 超限拉伸(预夹紧尺寸明显越过窗口上限)→ 全屏:走原生接管,
+            // split session 与面板随接管流程收尾。
+            BOOL overspreadToFullscreen = pinnedBundleId.length > 0 && maxHeight > 0 &&
+                (stretchedWidth >= maxWidth * PO_HOSTED_FLOAT_TAKEOVER_OVERSPREAD_FACTOR ||
+                 stretchedHeight >= maxHeight * PO_HOSTED_FLOAT_TAKEOVER_OVERSPREAD_FACTOR);
+            if (overspreadToFullscreen) {
+                [self playHostedWindowSnapHaptic];
+                [self openApplicationExternallyFromQuickSwitch:pinnedBundleId];
+                break;
+            }
+            BOOL grewEnough = recognizer.scale >= PO_HOSTED_FLOAT_ENTER_FACTOR;
+            if (!hostedWindowPinchStartedFloating) {
+                // 从钉底发起的手势:外拉落到默认"半屏"锚点,不够外拉回弹钉底。
+                if (grewEnough) {
+                    [self playHostedWindowSnapHaptic];
+                    [self enterHostedFloatingWindowAnimated:YES];
+                } else {
+                    [self exitHostedFloatingWindowAnimated:YES];
+                }
+                break;
+            }
+            CGRect defaultFrame = [self hostedFloatingDefaultFrameForBounds:bounds];
+            BOOL shrunkTowardSplit =
+                CGRectGetWidth(finalFrame) <= CGRectGetWidth(defaultFrame) * PO_HOSTED_FLOAT_EXIT_FRACTION;
+            if (shrunkTowardSplit) {
+                // 悬浮中捏合到足够小 → 回分屏钉底。
+                [self playHostedWindowSnapHaptic];
+                [self exitHostedFloatingWindowAnimated:YES];
+            } else {
+                [self applyHostedFloatingWindowFrame:
+                    [self clampedHostedFloatingFrameForBounds:bounds frame:finalFrame] animated:YES];
+            }
+            break;
+        }
+        case UIGestureRecognizerStateCancelled:
+        case UIGestureRecognizerStateFailed: {
+            if (hostedWindowPinchActive) {
+                hostedWindowPinchActive = NO;
+                if (hostedWindowFloating) {
+                    [self exitHostedFloatingWindowAnimated:YES];
+                } else {
+                    [self applyLayoutPreservingHandlePosition:YES];
+                }
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+-(void)playHostedWindowSnapHaptic{
+    UISelectionFeedbackGenerator *generator = [[UISelectionFeedbackGenerator alloc] init];
+    [generator selectionChanged];
+}
+
+-(void)hostedWindowChromeDidTapClose:(POHostedWindowChromeView *)chromeView{
+    if (hostedWindowPinchActive || panelState != POPanelStateOpen) {
+        return;
+    }
+    // 与把手/Home 关闭同一条链路:收起面板并拆除 split session、释放托管 App。
+    [self close];
+}
+
+-(void)hostedWindowChrome:(POHostedWindowChromeView *)chromeView
+      didReceiveMovePan:(UIPanGestureRecognizer *)recognizer{
+    if (!hostedWindowFloating || hostedWindowPinchActive) {
+        return;
+    }
+    if (recognizer.state != UIGestureRecognizerStateChanged) {
+        return;
+    }
+    CGPoint translation = [recognizer translationInView:self.view];
+    if (translation.x == 0 && translation.y == 0) {
+        return;
+    }
+    [recognizer setTranslation:CGPointZero inView:self.view];
+    CGRect frame = hostedFloatingWindowFrame;
+    frame.origin.x += translation.x;
+    frame.origin.y += translation.y;
+    [self applyHostedFloatingWindowFrame:
+        [self clampedHostedFloatingFrameForBounds:self.view.bounds frame:frame] animated:NO];
+}
+
 -(void)applyLayoutPreservingHandlePosition:(BOOL)preserveHandlePosition{
     CGRect bounds = self.view.bounds;
     if (CGRectGetWidth(bounds) <= 0 || CGRectGetHeight(bounds) <= 0 || !self.handle) {
@@ -2661,6 +3035,9 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         normalCardFrame.origin.y = CGRectGetMidY(bounds) - CGRectGetHeight(normalCardFrame) / 2.0;
     }
     normalCardFrame.origin.y = round(normalCardFrame.origin.y * screenScale) / screenScale;
+    if (splitLayout) {
+        splitPinnedCardFrame = normalCardFrame;
+    }
 
     BOOL horizontalMode = portraitHostedLandscapeOptimization;
     self.handle.layoutMode = horizontalMode
@@ -2736,6 +3113,15 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     if (splitLayout) {
         // 分屏卡片全宽,把手一列提到卡片之上保持可点。
         [scrollView bringSubviewToFront:handleScrollView];
+    }
+    if (splitLayout && hostedWindowFloating && panelState == POPanelStateOpen &&
+        !CGRectIsEmpty(hostedFloatingWindowFrame)) {
+        // 悬浮形态:按当前 bounds 重新夹紧窗口 frame(旋转/安全区变化后仍保持比例)。
+        [self applyHostedFloatingWindowFrame:
+            [self clampedHostedFloatingFrameForBounds:bounds frame:hostedFloatingWindowFrame]
+            animated:NO];
+    } else {
+        [self updateHostedWindowChrome];
     }
     CGFloat shadowProgress = MIN(MAX(scrollView.contentOffset.x / CONTENT_SHADOW_FADE_DISTANCE, 0), 1);
     shadowView.layer.shadowOpacity = CONTENT_SHADOW_OPACITY * shadowProgress;
@@ -3156,6 +3542,8 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
     [self cancelAutoNubTimer];
     [self removeKeyboardZoomSuspension:POKeyboardZoomSuspensionClosing];
+    // 每次打开都从分屏钉底形态起步,上次会话的悬浮 frame 不跨会话保留。
+    [self resetHostedFloatingWindowState];
     BOOL splitLayout = [self beginSplitSessionIfNeeded];
     if (splitLayout != splitLayoutActive) {
         splitLayoutActive = splitLayout;
@@ -3519,6 +3907,14 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 
 -(void)handle:(POHandle *)handle didReceiveTap:(UIGestureRecognizer *)recognizer{
     [self cancelAutoNubTimer];
+    if (panelState == POPanelStateInteractive && !scrollSnapAnimationInProgress &&
+        !scrollView.dragging && !scrollView.decelerating) {
+        // 拖拽被打断后面板残留在 Interactive(被 isPanelTransitioning 挡住无法关闭):
+        // 按当前位移落定开/关,保证把手点击始终有出路。
+        BOOL mostlyOpen = scrollView.contentOffset.x >= [self maximumContentOffsetX] / 2.0;
+        [self snapPanelToOpenState:mostlyOpen];
+        return;
+    }
     if ([self isPanelTransitioning] || scrollView.dragging || scrollView.decelerating) {
         return;
     }
@@ -4037,6 +4433,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     [self cancelAutoNubTimer];
     [self dismissTransientInteractionUI];
     splitLayoutActive = NO;
+    [self resetHostedFloatingWindowState];
     scrollSnapAnimationInProgress = NO;
     [scrollView setContentOffset:CGPointMake([self maximumContentOffsetX], 0) animated:NO];
     panelState = POPanelStateOpen;
@@ -4072,6 +4469,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 
     deferredOpenGeneration += 1;
     splitLayoutActive = NO;
+    [self resetHostedFloatingWindowState];
     [[POSplitSessionController sharedInstance] end];
     [self cancelQuickSwitchPrewarm];
 
@@ -4514,6 +4912,8 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
         }
         [v removeFromSuperview];
     }
+    // chrome 会被上面的子视图清扫移除,悬浮状态一并复位,下次发布后再挂回。
+    [self resetHostedFloatingWindowState];
     if (oldContextView) {
         contextView = nil;
         presentationBundleId = nil;
@@ -4533,6 +4933,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
 
 -(void)forceCloseAndReleaseImmediately{
     deferredOpenGeneration += 1;
+    [self resetHostedFloatingWindowState];
     [self cancelAutoNubTimer];
     scrollSnapAnimationInProgress = NO;
     scaledProgrammaticCloseAnimating = NO;
@@ -4884,6 +5285,8 @@ hostedInterfaceOrientationDidChange:(UIInterfaceOrientation)orientation
     presentationRetainedAfterRelease = NO;
     showingCantHost = NO;
     [self.contentView bringSubviewToFront:contextView];
+    // 新 scene stack 挂到 contentView 后,把窗口 chrome 重新提回最上层。
+    [self updateHostedWindowChrome];
 
     if (NSProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26 &&
         runtimeCategoryTransitionSnapshotActive && presentationSnapshotView &&
