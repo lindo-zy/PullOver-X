@@ -10,6 +10,10 @@
 # 包标识与版本读自 PullOverX/Package/DEBIAN/control;两次构建都成功后把
 # 版本号自增写回(PATCH 0-10,满 10 向 MINOR 进位)。
 #
+# 构建成功后通过 Bark 推送"pullover-x改动完成"到手机;推送 key 不入库,
+# 放在脚本同目录的 .build_notify.conf(已被 .gitignore 忽略),没有该文件
+# 或未配置时静默跳过,推送失败也不影响构建结果。
+#
 # Usage:
 #   ./build_roothide.sh          # ios16 + ios17
 #   THEOS=/path/to/theos ./build_roothide.sh
@@ -133,3 +137,26 @@ mv "$CONTROL_TMP" "$CONTROL"
 trap - EXIT
 
 echo "==> Build completed successfully: $CUR_VERSION -> $NEXT_VERSION"
+
+# Bark 构建完成推送:key 读自 .build_notify.conf 的一行 "BARK_TOKEN=xxx"。
+# 消息用 URL 编码写在下面,内容为 "pullover-x改动完成"(Bark 路径参数需转义)。
+NOTIFY_CONF="$ROOT_DIR/.build_notify.conf"
+NOTIFY_MESSAGE_ENCODED="pullover-x%E6%94%B9%E5%8A%A8%E5%AE%8C%E6%88%90"
+
+BARK_TOKEN="$(awk '/^[[:space:]]*BARK_TOKEN[[:space:]]*=/ {
+    sub(/^[[:space:]]*BARK_TOKEN[[:space:]]*=[[:space:]]*/, "");
+    gsub(/\r/, "");
+    gsub(/[[:space:]]+$/, "");
+    print;
+    exit
+}' "$NOTIFY_CONF" 2>/dev/null || true)"
+
+if [[ -z "$BARK_TOKEN" ]]; then
+    echo "==> Notification skipped: put 'BARK_TOKEN=xxx' in $NOTIFY_CONF to enable it"
+else
+    echo "==> Sending Bark notification"
+    if ! curl -fsS --connect-timeout 5 --max-time 15 \
+        "https://api.day.app/${BARK_TOKEN}/${NOTIFY_MESSAGE_ENCODED}" >/dev/null; then
+        echo "warning: Bark notification failed (build result unaffected)" >&2
+    fi
+fi

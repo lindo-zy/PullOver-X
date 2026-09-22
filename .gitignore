@@ -34,6 +34,7 @@ obj/
 # Local machine / deployment helpers
 .env
 .env.*
+.build_notify.conf
 *.mobileprovision
 *.p12
 *.pem
