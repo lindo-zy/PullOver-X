@@ -3245,9 +3245,14 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     }
     appRailView.centeredIcons = [self railUsesCenteredIcons];
     appRailView.horizontalLayout = [self railFloatsCenteredInClosedState];
+    // 悬浮网格放大一倍图标尺寸,方便直接点按;其余形态维持把手原宽。
+    CGFloat railTileSize = CGRectGetWidth(self.handle.frame);
+    if ([self railFloatsCenteredInClosedState]) {
+        railTileSize *= 2.0;
+    }
     [appRailView reloadWithBundleIdentifiers:bundleIds.array
                               activeBundleId:pinnedBundleId
-                                    tileSize:self.handle.frame.size.width];
+                                    tileSize:railTileSize];
     [self positionAppRail];
 }
 
@@ -3299,28 +3304,32 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     appRailView.frame = CGRectMake(CGRectGetMinX(handleFrame), railY, tileSize, railHeight);
 }
 
-// 缩点唤出的悬浮竖栏:横向一排图标,整排水平居中、垂直在可用空间内居中,
-// 宽度放不下时横向滚动(内部布局)。键盘可见且自然落位会压到键盘时,把可用
-// 底界抬到键盘上缘上方再重新居中。键盘收起后由 updateFloatingAppRailForKeyboard
-// 带着键盘动画落回屏幕中央。
+// 缩点唤出的悬浮竖栏:放大一倍的图标网格,水平居中、垂直在可用空间内居中;
+// 图标超出一行时按宽度折成多排,放不下时竖向滚动(内部布局)。键盘可见且
+// 自然落位会压到键盘时,把可用底界抬到键盘上缘上方再重新居中。键盘收起后由
+// updateFloatingAppRailForKeyboard 带着键盘动画落回屏幕中央。
 -(void)positionAppRailFloatingCenteredWithTileSize:(CGFloat)tileSize
                                           topLimit:(CGFloat)topLimit
                                        bottomLimit:(CGFloat)bottomLimit{
-    CGFloat railHeight = tileSize;
-    CGFloat railY = topLimit + MAX(0, (bottomLimit - topLimit - railHeight) / 2.0);
+    // 网格瓦片是把手宽的两倍(layoutAppRail 放大传入),这里的最小尺寸同步用两倍值。
+    CGFloat gridTileSize = tileSize * 2.0;
+    CGFloat margin = 10.0;
+    CGFloat maxWidth = MAX(0, CGRectGetWidth(self.view.bounds) - margin * 2.0);
+    CGSize gridSize = [appRailView gridContentSizeForMaxWidth:maxWidth];
+    CGFloat availableHeight = MAX(0, bottomLimit - topLimit);
+    CGFloat railWidth = MAX(MIN(gridSize.width, maxWidth), gridTileSize);
+    CGFloat railHeight = MIN(gridSize.height, MAX(availableHeight, gridTileSize));
+    CGFloat railY = topLimit + MAX(0, (availableHeight - railHeight) / 2.0);
     if (keyboardNotificationState == POKeyboardNotificationStateVisible &&
         !CGRectIsEmpty(floatingRailKeyboardFrame)) {
         CGFloat keyboardGap = 10.0;
         CGFloat keyboardTopLimit = CGRectGetMinY(floatingRailKeyboardFrame) - keyboardGap;
         if (keyboardTopLimit >= topLimit && railY + railHeight > keyboardTopLimit) {
-            CGFloat availableHeight = MAX(0, keyboardTopLimit - topLimit);
-            railY = topLimit + MAX(0, (availableHeight - railHeight) / 2.0);
+            CGFloat keyboardAvailableHeight = MAX(0, keyboardTopLimit - topLimit);
+            railHeight = MIN(railHeight, MAX(keyboardAvailableHeight, gridTileSize));
+            railY = topLimit + MAX(0, (keyboardAvailableHeight - railHeight) / 2.0);
         }
     }
-    CGFloat margin = 10.0;
-    CGFloat maxWidth = MAX(0, CGRectGetWidth(self.view.bounds) - margin * 2.0);
-    CGFloat railWidth = MIN(appRailView.preferredContentSize.width, maxWidth);
-    railWidth = MAX(railWidth, tileSize);
     CGFloat railX = (CGRectGetWidth(self.view.bounds) - railWidth) / 2.0;
     appRailView.frame = CGRectMake(railX, railY, railWidth, railHeight);
 }

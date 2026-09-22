@@ -124,15 +124,41 @@
 
 - (CGSize)preferredContentSize {
     NSUInteger count = tiles.count;
-    CGFloat extent = count > 0 ? tileSide * count + PO_APP_RAIL_TILE_GAP * (count - 1) : 0;
+    CGFloat height = count > 0 ? tileSide * count + PO_APP_RAIL_TILE_GAP * (count - 1) : 0;
     if (sideSwitchEnabled) {
-        extent = extent > 0 ? extent + PO_APP_RAIL_TILE_GAP + tileSide : tileSide;
+        height = height > 0 ? height + PO_APP_RAIL_TILE_GAP + tileSide : tileSide;
     }
-    if (extent <= 0) {
-        extent = tileSide;
+    if (height <= 0) {
+        height = tileSide;
     }
-    // 竖排返回{宽,自然高},横排返回{自然宽,高};控制器据此裁剪最终 frame。
-    return self.horizontalLayout ? CGSizeMake(extent, tileSide) : CGSizeMake(tileSide, extent);
+    return CGSizeMake(tileSide, height);
+}
+
+// 网格折行列数:与 layoutTiles 的横排分支共用同一公式,保证控制器据此
+// 定下的 frame 宽度和视图内部折行结果一致。
+- (CGFloat)gridColumnsForWidth:(CGFloat)width {
+    CGFloat columns = floor((MAX(width, tileSide) + PO_APP_RAIL_TILE_GAP) /
+                            (tileSide + PO_APP_RAIL_TILE_GAP));
+    return MAX(1.0, columns);
+}
+
+- (CGSize)gridContentSizeForMaxWidth:(CGFloat)maxWidth {
+    NSUInteger count = tiles.count;
+    CGFloat columns = [self gridColumnsForWidth:maxWidth];
+    CGFloat tileCount = (CGFloat)count;
+    CGFloat rows = MAX(1.0, ceil(tileCount / columns));
+    // 图标不足一整行时按实际占用的列数收窄,避免出现很宽的空胶囊。
+    CGFloat filledColumns = MIN(tileCount, columns);
+    CGFloat contentWidth = MIN(maxWidth,
+                               filledColumns * tileSide + (filledColumns - 1) * PO_APP_RAIL_TILE_GAP);
+    CGFloat contentHeight = rows * tileSide + (rows - 1) * PO_APP_RAIL_TILE_GAP;
+    if (sideSwitchEnabled) {
+        // 换边按钮钉在可视区右下角,底部留出一行按钮占位。
+        contentHeight += PO_APP_RAIL_TILE_GAP + tileSide;
+    }
+    contentWidth = MAX(contentWidth, tileSide);
+    contentHeight = MAX(contentHeight, tileSide);
+    return CGSizeMake(contentWidth, contentHeight);
 }
 
 // 底部"把手左右切换"按钮:开关关闭时整体移除,不显示也不响应。
@@ -230,16 +256,21 @@
     NSUInteger count = tiles.count;
     CGFloat sideInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
     if (self.horizontalLayout) {
-        // 悬浮横排:图标一行排开,放不下时横向滚动,换边按钮钉在可视区右端
-        // (底部内边距挪到右侧,让最后的图标可以滚到按钮左边)。
-        CGFloat contentWidth = tileSide * count + PO_APP_RAIL_TILE_GAP * MAX(0, (NSInteger)count - 1);
-        contentWidth = MAX(contentWidth, tileSide);
-        self.contentSize = CGSizeMake(contentWidth, tileSide);
-        self.contentInset = UIEdgeInsetsMake(0, 0, 0, sideInset);
-        self.scrollEnabled = contentWidth + sideInset > CGRectGetWidth(self.bounds) + 0.5;
+        // 悬浮网格:按可视区宽度折行成多排,超高时竖向滚动;换边按钮钉在
+        // 可视区右下角,底部内边距让最后一排可以滚到按钮上方。
+        CGFloat columns = [self gridColumnsForWidth:CGRectGetWidth(self.bounds)];
+        CGFloat rows = MAX(1.0, ceil((CGFloat)count / columns));
+        CGFloat contentHeight = rows * tileSide + (rows - 1) * PO_APP_RAIL_TILE_GAP;
+        self.contentSize = CGSizeMake(CGRectGetWidth(self.bounds), contentHeight);
+        self.contentInset = UIEdgeInsetsMake(0, 0, sideInset, 0);
+        self.scrollEnabled = contentHeight + sideInset > CGRectGetHeight(self.bounds) + 0.5;
         for (NSUInteger index = 0; index < count; index++) {
             POAppRailTile *tile = tiles[index];
-            tile.frame = CGRectMake(tileSide * index + PO_APP_RAIL_TILE_GAP * index, 0, tileSide, tileSide);
+            CGFloat column = floor(index % (NSUInteger)columns);
+            CGFloat row = floor(index / (NSUInteger)columns);
+            tile.frame = CGRectMake(column * (tileSide + PO_APP_RAIL_TILE_GAP),
+                                    row * (tileSide + PO_APP_RAIL_TILE_GAP),
+                                    tileSide, tileSide);
             [tile setHighlighted:[tile.bundleId isEqualToString:activeBundleId]];
         }
         lastLayoutAxisLength = CGRectGetWidth(self.bounds);
@@ -289,15 +320,14 @@
         [self layoutTiles];
     }
     CGFloat sideInset = sideSwitchEnabled ? tileSide + PO_APP_RAIL_TILE_GAP : 0;
-    if (self.horizontalLayout) {
-        self.scrollEnabled = self.contentSize.width + sideInset > CGRectGetWidth(self.bounds) + 0.5;
-    } else {
-        self.scrollEnabled = self.contentSize.height + sideInset > CGRectGetHeight(self.bounds) + 0.5;
-    }
+    // 竖排与悬浮网格都在高度方向滚动(网格宽度折行后不超可视区宽)。
+    self.scrollEnabled = self.contentSize.height + sideInset > CGRectGetHeight(self.bounds) + 0.5;
     if (sideSwitchButton) {
         if (self.horizontalLayout) {
-            // bounds.origin 随滚动变化,按其最大 X 取框让按钮始终钉在可视区右端。
-            sideSwitchButton.frame = CGRectMake(CGRectGetMaxX(self.bounds) - tileSide, 0, tileSide, tileSide);
+            // bounds.origin 随滚动变化,按可视区右下角取框让按钮始终钉在右下。
+            sideSwitchButton.frame = CGRectMake(CGRectGetMaxX(self.bounds) - tileSide,
+                                                CGRectGetMaxY(self.bounds) - tileSide,
+                                                tileSide, tileSide);
         } else {
             // bounds.origin 随滚动变化,按其最大 Y 取框让按钮始终钉在可视区底部。
             sideSwitchButton.frame = CGRectMake(0, CGRectGetMaxY(self.bounds) - tileSide, tileSide, tileSide);
@@ -329,14 +359,13 @@
 
 - (UIView *)longPressAnchorViewForRecognizer:(UILongPressGestureRecognizer *)recognizer {
     CGPoint point = [recognizer locationInView:self];
-    BOOL horizontal = self.horizontalLayout;
     POAppRailTile *nearest = nil;
     CGFloat nearestDistance = CGFLOAT_MAX;
     for (POAppRailTile *tile in tiles) {
-        // 横排按 X 距离就近命中,竖排按 Y 距离。
-        CGFloat distance = horizontal
-            ? fabs(CGRectGetMidX(tile.frame) - point.x)
-            : fabs(CGRectGetMidY(tile.frame) - point.y);
+        // 网格多排共用列,按瓦片中心到落点的二维距离就近命中,竖排单列也适用。
+        CGFloat dx = CGRectGetMidX(tile.frame) - point.x;
+        CGFloat dy = CGRectGetMidY(tile.frame) - point.y;
+        CGFloat distance = dx * dx + dy * dy;
         if (distance < nearestDistance) {
             nearestDistance = distance;
             nearest = tile;

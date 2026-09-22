@@ -29,7 +29,7 @@
 "Center Rail on Expand" = "把手展开居中";
 "Applies while the panel is open: the first rail icon stays at the top of the screen and the remaining icons move down to the vertical middle, and switching apps brings the tapped app's icon back to the top." = "开启后，小窗展开时第一个图标保持在屏幕顶部、其余图标下移到屏幕中部，切换应用后所点应用的图标回到顶部。";
 "Float Nub Rail Centered" = "缩点竖栏悬浮居中";
-"When enabled, the rail revealed by tapping the nubbed handle floats as a horizontal row of icons at the center of the screen, and moves above the keyboard while the keyboard is visible. Turn it off to keep that rail in the handle's edge column." = "开启后，点击缩点把手唤出的竖栏以横向一排图标悬浮在屏幕中央（放不下时可横向滚动），键盘弹出时自动上移到键盘上方；关闭则维持把手所在边缘列的原排布。";
+"When enabled, the rail revealed by tapping the nubbed handle floats as a grid of doubled-size icons at the center of the screen, wrapping into multiple rows and scrolling when they do not fit, and moves above the keyboard while the keyboard is visible. Turn it off to keep that rail in the handle's edge column." = "开启后，点击缩点把手唤出的竖栏以放大一倍的图标网格悬浮在屏幕中央，超出一行自动折成多排，放不下时可滚动，键盘弹出时自动上移到键盘上方；关闭则维持把手所在边缘列的原排布。";
 "Handle Activation Guard" = "把手防误触";
 "Auto-Nub Handle when Inactive" = "不活动时自动收起把手";
 "Handle Size" = "把手大小";
