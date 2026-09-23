@@ -1520,6 +1520,12 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
     id baseScene = nil;
     if (baseBundleId.length > 0) {
         baseScene = [[ContextHostManager sharedInstance] probeSceneForBundleId:baseBundleId];
+        if (!baseScene) {
+            // 前台 App 的 scene 探测不到(未 bootstrap/已失效)时无法为其提供
+            // 前台保护,分屏会话建不起来;返回 NO 退回普通整卡打开,不能凭
+            // frontMostBundleId 谎报成功,否则底层 App 失去保活会被挂起。
+            return NO;
+        }
     } else {
         baseBundleId = @"com.apple.springboard";
         SEL mainDisplaySceneSelector = NSSelectorFromString(@"_mainDisplayWindowScene");
@@ -1537,8 +1543,7 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
             }
         }
     }
-    [splitSession beginWithBaseBundleIdentifier:baseBundleId scene:baseScene];
-    return frontMostBundleId.length > 0;
+    return [splitSession beginWithBaseBundleIdentifier:baseBundleId scene:baseScene];
 }
 
 -(BOOL)isLandscapePanelFullyOpenAndIdle{
@@ -3928,7 +3933,8 @@ static CGFloat POPresentationAngleForOrientation(UIInterfaceOrientation orientat
             [self updateAppRailVisibilityAnimated:YES];
             return;
         }
-        nubRevealRailActive = NO;
+        // 缩点唤出标志不在这里清:open() 会检测到竖栏是缩点唤出态并立即收起,
+        // 点已固定图标打开小窗时悬浮网格才不会在打开过渡期间多悬半秒。
         [self open];
         return;
     }
@@ -5356,6 +5362,9 @@ hostedInterfaceOrientationDidChange:(UIInterfaceOrientation)orientation
             presentationSnapshotView.superview == self.contentView) {
             [self.contentView bringSubviewToFront:presentationSnapshotView];
         }
+        // 外部 scene 栈(键盘等)铺满整卡,挂载后把窗口 chrome 重新提回最上层,
+        // 否则关闭角标/拖动条被栈视图盖住点不到,直到下一次布局才恢复。
+        [self updateHostedWindowChrome];
     }
     [self reevaluateKeyboardZoomAnimated:YES];
     [self completeExternallyActivatedApplicationIfNeeded:bundleId];

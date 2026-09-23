@@ -19,12 +19,13 @@
     return controller;
 }
 
-- (void)beginWithBaseBundleIdentifier:(NSString *)bundleIdentifier scene:(id)scene {
+- (BOOL)beginWithBaseBundleIdentifier:(NSString *)bundleIdentifier scene:(id)scene {
     if (bundleIdentifier.length == 0 || !scene) {
-        return;
+        return NO;
     }
     self.active = YES;
     [self updateBaseBundleIdentifier:bundleIdentifier scene:scene];
+    return YES;
 }
 
 - (void)updateBaseBundleIdentifier:(NSString *)bundleIdentifier scene:(id)scene {

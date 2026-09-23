@@ -11,7 +11,7 @@
 
 + (instancetype)sharedInstance;
 
-- (void)beginWithBaseBundleIdentifier:(NSString *)bundleIdentifier scene:(id)scene;
+- (BOOL)beginWithBaseBundleIdentifier:(NSString *)bundleIdentifier scene:(id)scene;
 - (void)updateBaseBundleIdentifier:(NSString *)bundleIdentifier scene:(id)scene;
 - (void)end;
 - (BOOL)matchesBaseScene:(id)scene;
